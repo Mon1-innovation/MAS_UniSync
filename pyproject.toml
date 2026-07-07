@@ -1,0 +1,21 @@
+[project]
+name = "mas-unisync"
+version = "0.1.0"
+description = "MAS UniSync central server backend"
+requires-python = ">=3.11"
+dependencies = [
+    "fastapi",
+    "httpx",
+    "pydantic",
+    "sqlalchemy",
+    "uvicorn",
+]
+
+[project.optional-dependencies]
+test = [
+    "pytest",
+]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["."]
