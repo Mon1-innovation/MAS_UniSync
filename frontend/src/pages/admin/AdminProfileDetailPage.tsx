@@ -49,7 +49,9 @@ export function AdminProfileDetailPage() {
     if (!profile || !pendingAction) {
       return
     }
+    const actionType = pendingAction
     setIsBusy(true)
+    setError(null)
     try {
       if (pendingAction === 'banProfile') await banProfile(profile.id)
       if (pendingAction === 'unbanProfile') await unbanProfile(profile.id)
@@ -62,6 +64,8 @@ export function AdminProfileDetailPage() {
         navigate(`/admin/users/${profile.user_id}`)
       }
       setPendingAction(null)
+    } catch {
+      setError(actionType === 'deleteKey' ? 'Could not delete this profile key.' : 'Could not complete this admin action.')
     } finally {
       setIsBusy(false)
     }
@@ -122,7 +126,7 @@ export function AdminProfileDetailPage() {
             <Button type="button" leadingVisual={SyncIcon} onClick={() => setPendingAction('refreshKey')} disabled={Boolean(profile.revoked_at)}>
               Refresh key
             </Button>
-            <Button type="button" variant="danger" leadingVisual={TrashIcon} onClick={() => setPendingAction('deleteKey')} disabled={Boolean(profile.revoked_at)}>
+            <Button type="button" variant="danger" leadingVisual={TrashIcon} onClick={() => setPendingAction('deleteKey')}>
               Delete key
             </Button>
             <Button type="button" leadingVisual={UnlockIcon} onClick={() => setPendingAction('releaseLock')}>

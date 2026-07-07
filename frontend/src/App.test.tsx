@@ -328,6 +328,86 @@ describe('App', () => {
     expect(fetch).toHaveBeenCalledWith('/account/profile-keys/9', {credentials: 'include', headers: {}, method: 'DELETE'})
   })
 
+  it('allows revoked profile keys to be deleted from the account page', async () => {
+    localStorage.setItem('mas_unisync_user', JSON.stringify(normalUser))
+    mockFetch((input, init) => {
+      if (input === '/account/profile-keys' && !init?.method) {
+        return json({
+          items: [
+            {
+              id: 9,
+              user_id: 2,
+              display_name: 'Old key',
+              profile_key: 'maspk_old',
+              revoked_at: '2026-07-07T08:10:00',
+              last_used_at: null,
+              last_upload_at: null,
+              created_at: '2026-07-07T08:00:00',
+            },
+          ],
+        })
+      }
+      if (input === '/account/profile-keys/9' && init?.method === 'DELETE') {
+        return new Response(null, {status: 204})
+      }
+      return json({detail: {code: 'not_found'}}, {status: 404})
+    })
+
+    render(
+      <MemoryRouter initialEntries={['/account/profile-keys']}>
+        <App />
+      </MemoryRouter>,
+    )
+
+    const deleteButton = await screen.findByRole('button', {name: /delete key/i})
+    expect(deleteButton).toBeEnabled()
+    await userEvent.click(deleteButton)
+    await userEvent.click(await screen.findByRole('button', {name: /^delete$/i}))
+
+    await waitFor(() => expect(screen.queryByText('Old key')).not.toBeInTheDocument())
+    expect(fetch).toHaveBeenCalledWith('/account/profile-keys/9', {credentials: 'include', headers: {}, method: 'DELETE'})
+  })
+
+  it('shows an error when account profile key deletion fails', async () => {
+    localStorage.setItem('mas_unisync_user', JSON.stringify(normalUser))
+    mockFetch((input, init) => {
+      if (input === '/account/profile-keys' && !init?.method) {
+        return json({
+          items: [
+            {
+              id: 9,
+              user_id: 2,
+              display_name: 'Main',
+              profile_key: 'maspk_main',
+              revoked_at: null,
+              last_used_at: null,
+              last_upload_at: null,
+              created_at: '2026-07-07T08:00:00',
+            },
+          ],
+        })
+      }
+      if (input === '/account/profile-keys/9' && init?.method === 'DELETE') {
+        return json({detail: {code: 'delete_failed'}}, {status: 500})
+      }
+      return json({detail: {code: 'not_found'}}, {status: 404})
+    })
+
+    render(
+      <MemoryRouter initialEntries={['/account/profile-keys']}>
+        <App />
+      </MemoryRouter>,
+    )
+
+    await userEvent.click(await screen.findByRole('button', {name: /delete key/i}))
+    const confirmButton = await screen.findByRole('button', {name: /^delete$/i})
+    await userEvent.click(confirmButton)
+
+    await expect(screen.findByText(/could not delete this profile key/i)).resolves.toBeInTheDocument()
+    expect(confirmButton).toBeEnabled()
+    expect(screen.getByText('Main')).toBeInTheDocument()
+  })
+
   it('deletes an admin profile key and returns to the owning user detail', async () => {
     localStorage.setItem('mas_unisync_user', JSON.stringify(adminUser))
     const profile = {
@@ -364,6 +444,90 @@ describe('App', () => {
 
     await expect(screen.findByRole('heading', {level: 1, name: 'Main'})).resolves.toBeInTheDocument()
     await userEvent.click(screen.getByRole('button', {name: /delete key/i}))
+    await userEvent.click(await screen.findByRole('button', {name: /^delete this key$/i}))
+
+    await expect(screen.findAllByText('Player')).resolves.not.toHaveLength(0)
+    expect(fetch).toHaveBeenCalledWith('/admin/profile-keys/9', {credentials: 'include', headers: {}, method: 'DELETE'})
+  })
+
+  it('shows an error when admin profile key deletion fails', async () => {
+    localStorage.setItem('mas_unisync_user', JSON.stringify(adminUser))
+    const profile = {
+      id: 9,
+      user_id: 2,
+      display_name: 'Main',
+      profile_key: 'maspk_main',
+      revoked_at: null,
+      last_used_at: null,
+      last_upload_at: null,
+      created_at: '2026-07-07T08:00:00',
+    }
+    mockFetch((input, init) => {
+      if (input === '/account/profile-keys') {
+        return json({items: []})
+      }
+      if (input === '/admin/profiles/9') {
+        return json({profile})
+      }
+      if (input === '/admin/profile-keys/9' && init?.method === 'DELETE') {
+        return json({detail: {code: 'delete_failed'}}, {status: 500})
+      }
+      return json({detail: {code: 'not_found'}}, {status: 404})
+    })
+
+    render(
+      <MemoryRouter initialEntries={['/admin/profiles/9']}>
+        <App />
+      </MemoryRouter>,
+    )
+
+    await userEvent.click(await screen.findByRole('button', {name: /delete key/i}))
+    const confirmButton = await screen.findByRole('button', {name: /^delete this key$/i})
+    await userEvent.click(confirmButton)
+
+    await expect(screen.findByText(/could not delete this profile key/i)).resolves.toBeInTheDocument()
+    expect(confirmButton).toBeEnabled()
+    expect(screen.getByRole('heading', {level: 1, name: 'Main'})).toBeInTheDocument()
+  })
+
+  it('allows revoked profile keys to be deleted from the admin profile page', async () => {
+    localStorage.setItem('mas_unisync_user', JSON.stringify(adminUser))
+    const profile = {
+      id: 9,
+      user_id: 2,
+      display_name: 'Old key',
+      profile_key: 'maspk_old',
+      revoked_at: '2026-07-07T08:10:00',
+      last_used_at: null,
+      last_upload_at: null,
+      created_at: '2026-07-07T08:00:00',
+    }
+    mockFetch((input, init) => {
+      if (input === '/account/profile-keys') {
+        return json({items: []})
+      }
+      if (input === '/admin/profiles/9') {
+        return json({profile})
+      }
+      if (input === '/admin/profile-keys/9' && init?.method === 'DELETE') {
+        return new Response(null, {status: 204})
+      }
+      if (input === '/admin/users/2') {
+        return json({user: normalUser, profiles: []})
+      }
+      return json({detail: {code: 'not_found'}}, {status: 404})
+    })
+
+    render(
+      <MemoryRouter initialEntries={['/admin/profiles/9']}>
+        <App />
+      </MemoryRouter>,
+    )
+
+    await expect(screen.findByRole('heading', {level: 1, name: 'Old key'})).resolves.toBeInTheDocument()
+    const deleteButton = screen.getByRole('button', {name: /delete key/i})
+    expect(deleteButton).toBeEnabled()
+    await userEvent.click(deleteButton)
     await userEvent.click(await screen.findByRole('button', {name: /^delete this key$/i}))
 
     await expect(screen.findAllByText('Player')).resolves.not.toHaveLength(0)

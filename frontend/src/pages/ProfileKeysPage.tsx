@@ -74,7 +74,9 @@ export function ProfileKeysPage() {
     if (!pendingAction) {
       return
     }
+    const actionType = pendingAction.type
     setIsBusy(true)
+    setError(null)
     try {
       if (pendingAction.type === 'refresh') {
         replaceProfile(await refreshProfileKey(pendingAction.profile.id))
@@ -83,6 +85,8 @@ export function ProfileKeysPage() {
         removeProfile(pendingAction.profile.id)
       }
       setPendingAction(null)
+    } catch {
+      setError(actionType === 'delete' ? 'Could not delete this profile key.' : 'Could not refresh this profile key.')
     } finally {
       setIsBusy(false)
     }
@@ -144,7 +148,6 @@ export function ProfileKeysPage() {
                 leadingVisual={TrashIcon}
                 aria-label={`Delete key for ${profile.display_name || profile.id}`}
                 onClick={() => setPendingAction({type: 'delete', profile})}
-                disabled={Boolean(profile.revoked_at)}
               >
                 Delete key
               </Button>
