@@ -1,0 +1,9 @@
+.git
+.pytest_cache
+.vscode
+__pycache__
+*.pyc
+backend-dev.err.log
+backend-dev.log
+data
+frontend

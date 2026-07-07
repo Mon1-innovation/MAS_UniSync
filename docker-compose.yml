@@ -1,0 +1,47 @@
+services:
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:-mas_unisync}
+      POSTGRES_USER: ${POSTGRES_USER:-mas_unisync}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?POSTGRES_PASSWORD must be set}
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER} -d $${POSTGRES_DB}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    restart: unless-stopped
+
+  backend:
+    build: .
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      MAS_UNISYNC_ENV: production
+      DATABASE_URL: postgresql+psycopg://${POSTGRES_USER:-mas_unisync}:${POSTGRES_PASSWORD:?POSTGRES_PASSWORD must be set}@postgres:5432/${POSTGRES_DB:-mas_unisync}
+      OBJECT_STORAGE_PATH: /data/objects
+      SESSION_SECRET: ${SESSION_SECRET:?SESSION_SECRET must be set}
+      FLARUM_URL: ${FLARUM_URL:-https://forum.example}
+      ADMIN_FLARUM_GROUP_IDS: ${ADMIN_FLARUM_GROUP_IDS:-}
+      ADMIN_FLARUM_GROUP_NAMES: ${ADMIN_FLARUM_GROUP_NAMES:-}
+      LOCK_TTL_SECONDS: ${LOCK_TTL_SECONDS:-60}
+    volumes:
+      - object_data:/data/objects
+    ports:
+      - "${BACKEND_PORT:-8000}:8000"
+    restart: unless-stopped
+
+  frontend:
+    build: ./frontend
+    depends_on:
+      - backend
+    ports:
+      - "${FRONTEND_PORT:-80}:80"
+    restart: unless-stopped
+
+volumes:
+  postgres_data:
+  object_data:

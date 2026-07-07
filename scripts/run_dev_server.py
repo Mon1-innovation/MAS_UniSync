@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import argparse
 import os
-import re
 import sys
 from pathlib import Path
 
@@ -13,7 +12,7 @@ if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
 from mas_unisync_server.main import create_app
-from mas_unisync_server.settings import Settings
+from mas_unisync_server.settings import build_settings
 
 
 def load_env_file(path: Path) -> None:
@@ -28,24 +27,6 @@ def load_env_file(path: Path) -> None:
         value = value.strip().strip('"').strip("'")
         if key and key not in os.environ:
             os.environ[key] = value
-
-
-def parse_csv_set(value: str | None) -> set[str]:
-    if not value:
-        return set()
-    return {item.strip() for item in re.split(r"[,，;；]", value) if item.strip()}
-
-
-def build_settings() -> Settings:
-    return Settings(
-        database_url=os.getenv("DATABASE_URL", "sqlite:///./data/mas_unisync.db"),
-        object_storage_path=Path(os.getenv("OBJECT_STORAGE_PATH", "./data/objects")),
-        session_secret=os.getenv("SESSION_SECRET", "local-dev-session"),
-        flarum_url=os.getenv("FLARUM_URL", "https://forum.example"),
-        admin_flarum_group_ids=parse_csv_set(os.getenv("ADMIN_FLARUM_GROUP_IDS")),
-        admin_flarum_group_names=parse_csv_set(os.getenv("ADMIN_FLARUM_GROUP_NAMES")),
-        lock_ttl_seconds=int(os.getenv("LOCK_TTL_SECONDS", "60")),
-    )
 
 
 def main() -> None:

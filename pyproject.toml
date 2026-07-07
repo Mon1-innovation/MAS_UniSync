@@ -6,7 +6,10 @@ requires-python = ">=3.11"
 dependencies = [
     "fastapi",
     "httpx",
+    "itsdangerous",
     "pydantic",
+    "psycopg[binary]",
+    "python-multipart",
     "sqlalchemy",
     "uvicorn",
 ]
@@ -19,3 +22,6 @@ test = [
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 pythonpath = ["."]
+
+[tool.setuptools.packages.find]
+include = ["mas_unisync_server*"]
