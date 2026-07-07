@@ -16,8 +16,8 @@ export function refreshProfileKey(profileId: number) {
   return request<Profile>(`/account/profile-keys/${profileId}/refresh`, {method: 'POST'})
 }
 
-export function revokeProfileKey(profileId: number) {
-  return request<Profile>(`/account/profile-keys/${profileId}/revoke`, {method: 'POST'})
+export function deleteProfileKey(profileId: number) {
+  return request<void>(`/account/profile-keys/${profileId}`, {method: 'DELETE'})
 }
 
 export function getAccountProfile(profileId: number) {

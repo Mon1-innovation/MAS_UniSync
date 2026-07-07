@@ -50,8 +50,8 @@ export function refreshAdminProfileKey(keyId: number) {
   return request<Profile>(`/admin/profile-keys/${keyId}/refresh`, {method: 'POST'})
 }
 
-export function revokeAdminProfileKey(keyId: number) {
-  return request<Profile>(`/admin/profile-keys/${keyId}/revoke`, {method: 'POST'})
+export function deleteAdminProfileKey(keyId: number) {
+  return request<void>(`/admin/profile-keys/${keyId}`, {method: 'DELETE'})
 }
 
 export function releaseAdminLock(lockIdOrProfileId: number) {

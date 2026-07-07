@@ -2,7 +2,7 @@ import {Box, Button, Text} from '@primer/react'
 import {FileDirectoryIcon, KeyIcon, PlusIcon, SyncIcon, TrashIcon} from '@primer/octicons-react'
 import {useEffect, useMemo, useState} from 'react'
 import {Link} from 'react-router-dom'
-import {createProfileKey, listProfileKeys, refreshProfileKey, revokeProfileKey} from '../api/profileKeysApi'
+import {createProfileKey, deleteProfileKey, listProfileKeys, refreshProfileKey} from '../api/profileKeysApi'
 import type {Profile} from '../api/types'
 import {ConfirmDialog} from '../components/ConfirmDialog'
 import {CopyableSecret} from '../components/CopyableSecret'
@@ -13,7 +13,7 @@ import {LoadingState} from '../components/LoadingState'
 import {RelativeTime} from '../components/RelativeTime'
 import {StatusLabel} from '../components/StatusLabel'
 
-type PendingAction = {type: 'refresh' | 'revoke'; profile: Profile} | null
+type PendingAction = {type: 'refresh' | 'delete'; profile: Profile} | null
 
 export function ProfileKeysPage() {
   const [profiles, setProfiles] = useState<Profile[]>([])
@@ -53,6 +53,10 @@ export function ProfileKeysPage() {
     setProfiles((current) => current.map((profile) => (profile.id === nextProfile.id ? nextProfile : profile)))
   }
 
+  function removeProfile(profileId: number) {
+    setProfiles((current) => current.filter((profile) => profile.id !== profileId))
+  }
+
   async function handleCreate(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault()
     setIsBusy(true)
@@ -72,11 +76,12 @@ export function ProfileKeysPage() {
     }
     setIsBusy(true)
     try {
-      const profile =
-        pendingAction.type === 'refresh'
-          ? await refreshProfileKey(pendingAction.profile.id)
-          : await revokeProfileKey(pendingAction.profile.id)
-      replaceProfile(profile)
+      if (pendingAction.type === 'refresh') {
+        replaceProfile(await refreshProfileKey(pendingAction.profile.id))
+      } else {
+        await deleteProfileKey(pendingAction.profile.id)
+        removeProfile(pendingAction.profile.id)
+      }
       setPendingAction(null)
     } finally {
       setIsBusy(false)
@@ -137,11 +142,11 @@ export function ProfileKeysPage() {
                 size="small"
                 variant="danger"
                 leadingVisual={TrashIcon}
-                aria-label={`Revoke key for ${profile.display_name || profile.id}`}
-                onClick={() => setPendingAction({type: 'revoke', profile})}
+                aria-label={`Delete key for ${profile.display_name || profile.id}`}
+                onClick={() => setPendingAction({type: 'delete', profile})}
                 disabled={Boolean(profile.revoked_at)}
               >
-                Revoke key
+                Delete key
               </Button>
             </Box>
           </Box>
@@ -161,13 +166,13 @@ export function ProfileKeysPage() {
 
       {pendingAction ? (
         <ConfirmDialog
-          title={pendingAction.type === 'refresh' ? 'Refresh profile key?' : 'Revoke profile key?'}
+          title={pendingAction.type === 'refresh' ? 'Refresh profile key?' : 'Delete profile key?'}
           message={
             pendingAction.type === 'refresh'
               ? 'The old key will stop working immediately. Copy the new key after refreshing.'
-              : 'This profile key will stop working and remain visible for auditability.'
+              : 'This profile key and its stored persistent files will be deleted.'
           }
-          confirmText={pendingAction.type === 'refresh' ? 'Refresh' : 'Revoke'}
+          confirmText={pendingAction.type === 'refresh' ? 'Refresh' : 'Delete'}
           onConfirm={handleConfirmAction}
           onCancel={() => setPendingAction(null)}
           isBusy={isBusy}

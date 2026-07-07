@@ -1,17 +1,17 @@
 import {Box, Button, Text} from '@primer/react'
 import {BlockedIcon, DownloadIcon, ShieldCheckIcon, SyncIcon, TrashIcon, UnlockIcon} from '@primer/octicons-react'
 import {useEffect, useState} from 'react'
-import {useParams} from 'react-router-dom'
+import {useNavigate, useParams} from 'react-router-dom'
 import {
   banProfile,
   banProfileKey,
+  deleteAdminProfileKey,
   downloadBackupPersistent,
   downloadCurrentPersistent,
   getAdminProfile,
   refreshAdminProfileKey,
   releaseAdminLock,
   restoreAdminBackup,
-  revokeAdminProfileKey,
   unbanProfile,
   unbanProfileKey,
 } from '../../api/adminApi'
@@ -23,10 +23,11 @@ import {LoadingState} from '../../components/LoadingState'
 import {RelativeTime} from '../../components/RelativeTime'
 import {StatusLabel} from '../../components/StatusLabel'
 
-type PendingAction = 'banProfile' | 'unbanProfile' | 'banKey' | 'unbanKey' | 'refreshKey' | 'revokeKey' | 'releaseLock' | null
+type PendingAction = 'banProfile' | 'unbanProfile' | 'banKey' | 'unbanKey' | 'refreshKey' | 'deleteKey' | 'releaseLock' | null
 
 export function AdminProfileDetailPage() {
   const {profileId} = useParams()
+  const navigate = useNavigate()
   const numericProfileId = Number(profileId)
   const [profile, setProfile] = useState<Profile | null>(null)
   const [error, setError] = useState<string | null>(null)
@@ -56,7 +57,10 @@ export function AdminProfileDetailPage() {
       if (pendingAction === 'unbanKey') await unbanProfileKey(profile.id)
       if (pendingAction === 'releaseLock') await releaseAdminLock(profile.id)
       if (pendingAction === 'refreshKey') setProfile(await refreshAdminProfileKey(profile.id))
-      if (pendingAction === 'revokeKey') setProfile(await revokeAdminProfileKey(profile.id))
+      if (pendingAction === 'deleteKey') {
+        await deleteAdminProfileKey(profile.id)
+        navigate(`/admin/users/${profile.user_id}`)
+      }
       setPendingAction(null)
     } finally {
       setIsBusy(false)
@@ -118,8 +122,8 @@ export function AdminProfileDetailPage() {
             <Button type="button" leadingVisual={SyncIcon} onClick={() => setPendingAction('refreshKey')} disabled={Boolean(profile.revoked_at)}>
               Refresh key
             </Button>
-            <Button type="button" variant="danger" leadingVisual={TrashIcon} onClick={() => setPendingAction('revokeKey')} disabled={Boolean(profile.revoked_at)}>
-              Revoke key
+            <Button type="button" variant="danger" leadingVisual={TrashIcon} onClick={() => setPendingAction('deleteKey')} disabled={Boolean(profile.revoked_at)}>
+              Delete key
             </Button>
             <Button type="button" leadingVisual={UnlockIcon} onClick={() => setPendingAction('releaseLock')}>
               Force-release lock
@@ -157,9 +161,13 @@ export function AdminProfileDetailPage() {
       {pendingAction ? (
         <ConfirmDialog
           title={actionTitle(pendingAction)}
-          message="This admin action is applied immediately and will be recorded in audit logs."
+          message={
+            pendingAction === 'deleteKey'
+              ? 'This profile key and its stored persistent files will be deleted. The admin action will be recorded in audit logs.'
+              : 'This admin action is applied immediately and will be recorded in audit logs.'
+          }
           confirmText={actionConfirmText(pendingAction)}
-          variant={pendingAction.includes('ban') || pendingAction.includes('revoke') ? 'danger' : 'primary'}
+          variant={pendingAction.includes('ban') || pendingAction.includes('delete') ? 'danger' : 'primary'}
           onConfirm={handleConfirm}
           onCancel={() => setPendingAction(null)}
           isBusy={isBusy}
@@ -176,7 +184,7 @@ function actionTitle(action: PendingAction) {
     banKey: 'Ban this key?',
     unbanKey: 'Unban this key?',
     refreshKey: 'Refresh this key?',
-    revokeKey: 'Revoke this key?',
+    deleteKey: 'Delete this key?',
     releaseLock: 'Force-release lock?',
   }
   return action ? labels[action] : ''

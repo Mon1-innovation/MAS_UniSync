@@ -6,7 +6,7 @@ import secrets
 from datetime import date, datetime, timedelta, timezone
 
 from fastapi import HTTPException, Request
-from sqlalchemy import desc, func, or_, select
+from sqlalchemy import delete, desc, func, or_, select
 from sqlalchemy.orm import Session
 
 from .models import (
@@ -307,6 +307,43 @@ def restore_backup(db: Session, profile_id: int, backup_id: int, now: datetime) 
         current.version_id = backup.version_id
         current.updated_at = now
     return db.get(PersistentVersion, backup.version_id)
+
+
+def delete_profile_key(
+    db: Session,
+    storage: LocalObjectStorage,
+    request: Request,
+    actor: User,
+    profile: Profile,
+    action: str,
+) -> None:
+    object_paths = list(
+        db.scalars(select(PersistentVersion.object_path).where(PersistentVersion.profile_id == profile.id))
+    )
+    audit(
+        db,
+        request,
+        actor,
+        action,
+        target_user_id=profile.user_id,
+        target_profile_id=profile.id,
+        target_profile_key_id=profile.id,
+    )
+    db.execute(delete(Lock).where(Lock.profile_id == profile.id))
+    db.execute(delete(PersistentCurrent).where(PersistentCurrent.profile_id == profile.id))
+    db.execute(delete(PersistentDailyBackup).where(PersistentDailyBackup.profile_id == profile.id))
+    db.execute(delete(PersistentVersion).where(PersistentVersion.profile_id == profile.id))
+    db.execute(
+        delete(Ban).where(
+            Ban.target_type == "key",
+            Ban.target_id == profile.id,
+            Ban.revoked_at.is_(None),
+        )
+    )
+    db.delete(profile)
+    db.commit()
+    for object_path in object_paths:
+        storage.delete(object_path)
 
 
 def profile_storage_usage(db: Session, profile_id: int) -> int:

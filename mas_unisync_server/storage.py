@@ -18,3 +18,12 @@ class LocalObjectStorage:
     def get(self, object_path: str) -> bytes:
         return (self.root / object_path).read_bytes()
 
+    def delete(self, object_path: str) -> None:
+        full_path = (self.root / object_path).resolve()
+        root = self.root.resolve()
+        if not full_path.is_relative_to(root):
+            raise ValueError("object_path escapes storage root")
+        try:
+            full_path.unlink()
+        except FileNotFoundError:
+            pass

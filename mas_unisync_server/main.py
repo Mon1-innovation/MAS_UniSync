@@ -20,6 +20,7 @@ from .services import (
     aware,
     backup_payload,
     banned_exception,
+    delete_profile_key as service_delete_profile_key,
     generate_profile_key,
     get_profile_by_key,
     profile_payload,
@@ -136,8 +137,8 @@ def create_app(settings: Settings | None = None, flarum_client=None) -> FastAPI:
         db.commit()
         return profile_payload(profile)
 
-    @app.post("/account/profile-keys/{profile_id}/revoke")
-    def revoke_profile_key(
+    @app.delete("/account/profile-keys/{profile_id}", status_code=204)
+    def delete_account_profile_key(
         profile_id: int,
         request: Request,
         user: User = Depends(current_user),
@@ -146,18 +147,15 @@ def create_app(settings: Settings | None = None, flarum_client=None) -> FastAPI:
         profile = db.get(Profile, profile_id)
         if profile is None or profile.user_id != user.id:
             raise HTTPException(status_code=404, detail={"code": "profile_not_found"})
-        profile.revoked_at = request_now(request)
-        audit(
+        service_delete_profile_key(
             db,
+            request.app.state.storage,
             request,
             user,
-            "profile_key.revoke",
-            target_user_id=user.id,
-            target_profile_id=profile.id,
-            target_profile_key_id=profile.id,
+            profile,
+            "profile_key.delete",
         )
-        db.commit()
-        return profile_payload(profile)
+        return Response(status_code=204)
 
     @app.get("/account/profiles/{profile_id}")
     def get_account_profile(profile_id: int, user: User = Depends(current_user), db: Session = Depends(get_db)):
@@ -538,15 +536,20 @@ def create_app(settings: Settings | None = None, flarum_client=None) -> FastAPI:
         db.commit()
         return profile_payload(profile)
 
-    @app.post("/admin/profile-keys/{key_id}/revoke")
-    def admin_revoke_key(key_id: int, request: Request, actor: User = Depends(admin_user), db: Session = Depends(get_db)):
+    @app.delete("/admin/profile-keys/{key_id}", status_code=204)
+    def admin_delete_key(key_id: int, request: Request, actor: User = Depends(admin_user), db: Session = Depends(get_db)):
         profile = db.get(Profile, key_id)
         if profile is None:
             raise HTTPException(status_code=404, detail={"code": "profile_not_found"})
-        profile.revoked_at = request_now(request)
-        audit(db, request, actor, "admin.profile_key.revoke", target_user_id=profile.user_id, target_profile_id=profile.id, target_profile_key_id=profile.id)
-        db.commit()
-        return profile_payload(profile)
+        service_delete_profile_key(
+            db,
+            request.app.state.storage,
+            request,
+            actor,
+            profile,
+            "admin.profile_key.delete",
+        )
+        return Response(status_code=204)
 
     @app.post("/admin/locks/{lock_id}/release", status_code=204)
     def admin_release_lock(lock_id: int, request: Request, actor: User = Depends(admin_user), db: Session = Depends(get_db)):

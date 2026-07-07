@@ -271,7 +271,7 @@ describe('App', () => {
     expect(screen.getByText('No profiles')).toBeInTheDocument()
   })
 
-  it('updates a refreshed profile key and marks revoked rows', async () => {
+  it('updates a refreshed profile key and removes deleted rows', async () => {
     localStorage.setItem('mas_unisync_user', JSON.stringify(normalUser))
     mockFetch((input, init) => {
       if (input === '/account/profile-keys' && !init?.method) {
@@ -302,17 +302,8 @@ describe('App', () => {
           created_at: '2026-07-07T08:00:00',
         })
       }
-      if (input === '/account/profile-keys/9/revoke') {
-        return json({
-          id: 9,
-          user_id: 2,
-          display_name: 'Main',
-          profile_key: 'maspk_new',
-          revoked_at: '2026-07-07T09:00:00',
-          last_used_at: null,
-          last_upload_at: null,
-          created_at: '2026-07-07T08:00:00',
-        })
+      if (input === '/account/profile-keys/9' && init?.method === 'DELETE') {
+        return new Response(null, {status: 204})
       }
       return json({detail: {code: 'not_found'}}, {status: 404})
     })
@@ -328,9 +319,55 @@ describe('App', () => {
     await userEvent.click(await screen.findByRole('button', {name: /^refresh$/i}))
     await expect(screen.findByText('maspk_new')).resolves.toBeInTheDocument()
 
-    await userEvent.click(screen.getByRole('button', {name: /revoke key/i}))
-    await userEvent.click(await screen.findByRole('button', {name: /^revoke$/i}))
-    await expect(screen.findByText(/revoked/i)).resolves.toBeInTheDocument()
+    await userEvent.click(screen.getByRole('button', {name: /delete key/i}))
+    expect(screen.getByText(/stored persistent files will be deleted/i)).toBeInTheDocument()
+    await userEvent.click(await screen.findByRole('button', {name: /^delete$/i}))
+
+    await waitFor(() => expect(screen.queryByText('Main')).not.toBeInTheDocument())
+    expect(screen.getByText('No profile keys')).toBeInTheDocument()
+    expect(fetch).toHaveBeenCalledWith('/account/profile-keys/9', {credentials: 'include', headers: {}, method: 'DELETE'})
+  })
+
+  it('deletes an admin profile key and returns to the owning user detail', async () => {
+    localStorage.setItem('mas_unisync_user', JSON.stringify(adminUser))
+    const profile = {
+      id: 9,
+      user_id: 2,
+      display_name: 'Main',
+      profile_key: 'maspk_main',
+      revoked_at: null,
+      last_used_at: null,
+      last_upload_at: null,
+      created_at: '2026-07-07T08:00:00',
+    }
+    mockFetch((input, init) => {
+      if (input === '/account/profile-keys') {
+        return json({items: []})
+      }
+      if (input === '/admin/profiles/9') {
+        return json({profile})
+      }
+      if (input === '/admin/profile-keys/9' && init?.method === 'DELETE') {
+        return new Response(null, {status: 204})
+      }
+      if (input === '/admin/users/2') {
+        return json({user: normalUser, profiles: []})
+      }
+      return json({detail: {code: 'not_found'}}, {status: 404})
+    })
+
+    render(
+      <MemoryRouter initialEntries={['/admin/profiles/9']}>
+        <App />
+      </MemoryRouter>,
+    )
+
+    await expect(screen.findByRole('heading', {level: 1, name: 'Main'})).resolves.toBeInTheDocument()
+    await userEvent.click(screen.getByRole('button', {name: /delete key/i}))
+    await userEvent.click(await screen.findByRole('button', {name: /^delete this key$/i}))
+
+    await expect(screen.findAllByText('Player')).resolves.not.toHaveLength(0)
+    expect(fetch).toHaveBeenCalledWith('/admin/profile-keys/9', {credentials: 'include', headers: {}, method: 'DELETE'})
   })
 
   it('links profile keys to owned persistent files and downloads them', async () => {

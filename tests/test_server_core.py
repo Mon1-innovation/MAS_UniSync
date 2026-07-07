@@ -4,8 +4,10 @@ from datetime import datetime, timedelta, timezone
 
 import pytest
 from fastapi.testclient import TestClient
+from sqlalchemy import select
 
 from mas_unisync_server.main import create_app
+from mas_unisync_server.models import AuditLog, Ban, Lock, PersistentCurrent, PersistentDailyBackup, PersistentVersion, Profile
 from mas_unisync_server.settings import Settings
 
 
@@ -158,6 +160,51 @@ def test_profile_key_generation_lists_plaintext_and_refresh_invalidates_old_key(
     current = client.get("/v1/persistent/current", headers={"X-MAS-Profile-Key": refreshed["profile_key"]})
     assert current.status_code == 200
     assert current.json()["sha256"] == upload.json()["sha256"]
+
+
+def test_delete_profile_key_removes_rows_and_object_files(client):
+    profile = new_profile(client)
+    key = profile["profile_key"]
+    lease = acquire_lock(client, key)
+    base = datetime(2026, 1, 1, 10, 0, tzinfo=timezone.utc)
+    assert upload_persistent(client, key, lease, b"first", now=base).status_code == 201
+    assert upload_persistent(client, key, lease, b"second", now=base + timedelta(days=1)).status_code == 201
+
+    with client.app.state.SessionLocal() as db:
+        object_paths = list(
+            db.scalars(select(PersistentVersion.object_path).where(PersistentVersion.profile_id == profile["id"]))
+        )
+    assert len(object_paths) == 2
+    object_root = client.app.state.storage.root
+    assert all((object_root / path).exists() for path in object_paths)
+
+    client.post("/logout")
+    login(client, "admin@example.com")
+    assert client.post(f"/admin/profile-keys/{profile['id']}/ban", json={"reason": "delete me"}).status_code == 200
+    client.post("/logout")
+    login(client)
+
+    deleted = client.delete(f"/account/profile-keys/{profile['id']}")
+
+    assert deleted.status_code == 204
+    assert client.get("/v1/profile/resolve", headers={"X-MAS-Profile-Key": key}).status_code == 401
+    assert client.get("/account/profile-keys").json()["items"] == []
+    assert client.get(f"/account/profiles/{profile['id']}").status_code == 404
+
+    client.post("/logout")
+    login(client, "admin@example.com")
+    assert client.get(f"/admin/profiles/{profile['id']}").status_code == 404
+
+    with client.app.state.SessionLocal() as db:
+        assert db.get(Profile, profile["id"]) is None
+        assert db.scalar(select(Lock).where(Lock.profile_id == profile["id"])) is None
+        assert db.scalar(select(PersistentCurrent).where(PersistentCurrent.profile_id == profile["id"])) is None
+        assert db.scalars(select(PersistentDailyBackup).where(PersistentDailyBackup.profile_id == profile["id"])).all() == []
+        assert db.scalars(select(PersistentVersion).where(PersistentVersion.profile_id == profile["id"])).all() == []
+        assert db.scalars(select(Ban).where(Ban.target_type == "key", Ban.target_id == profile["id"], Ban.revoked_at.is_(None))).all() == []
+        actions = [log.action for log in db.scalars(select(AuditLog).order_by(AuditLog.id))]
+    assert "profile_key.delete" in actions
+    assert all(not (object_root / path).exists() for path in object_paths)
 
 
 def test_lock_acquire_heartbeat_release_and_ttl_expiry(client):
@@ -379,6 +426,23 @@ def test_admin_actions_write_audit_logs_with_request_context(client):
     assert "admin.profile.ban" in actions
     assert "admin.lock.release" in actions
     assert any(entry["user_agent"] == "pytest-agent" for entry in logs)
+
+
+def test_admin_delete_profile_key_removes_profile_and_writes_audit_log(client):
+    profile = new_profile(client)
+    client.post("/logout")
+    login(client, "admin@example.com")
+
+    response = client.delete(f"/admin/profile-keys/{profile['id']}", headers={"User-Agent": "pytest-agent"})
+
+    assert response.status_code == 204
+    assert client.get(f"/admin/profiles/{profile['id']}").status_code == 404
+    logs = client.get("/admin/audit-logs").json()["items"]
+    delete_log = next(entry for entry in logs if entry["action"] == "admin.profile_key.delete")
+    assert delete_log["target_user_id"] == profile["user_id"]
+    assert delete_log["target_profile_id"] == profile["id"]
+    assert delete_log["target_profile_key_id"] == profile["id"]
+    assert delete_log["user_agent"] == "pytest-agent"
 
 
 def test_admin_user_detail_includes_only_target_users_profiles_sorted_by_id(client):
