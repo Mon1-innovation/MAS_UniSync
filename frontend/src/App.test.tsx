@@ -237,6 +237,7 @@ describe('App', () => {
 
     const link = await screen.findByRole('link', {name: /desktop/i})
     expect(link).toHaveAttribute('href', '/admin/profiles/11')
+    expect(screen.queryByRole('heading', {name: /^profiles$/i})).not.toBeInTheDocument()
     expect(screen.getByText('active')).toBeInTheDocument()
     expect(document.querySelector('time[datetime="2026-07-07T08:00:00"]')).toBeInTheDocument()
     expect(document.querySelector('time[datetime="2026-07-07T08:30:00"]')).toBeInTheDocument()

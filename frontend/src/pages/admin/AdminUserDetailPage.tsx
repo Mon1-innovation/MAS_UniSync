@@ -80,9 +80,6 @@ export function AdminUserDetailPage() {
             <Info label="Last login" value={<RelativeTime value={user.last_login_at} />} />
           </Box>
           <Box className="table-panel">
-            <Box className="table-heading">
-              <Text as="h2">Profiles</Text>
-            </Box>
             {profiles.length === 0 ? (
               <EmptyState title="No profiles" message="This user has not created any profiles." />
             ) : (
