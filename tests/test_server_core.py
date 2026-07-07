@@ -265,11 +265,46 @@ def test_daily_backups_replace_same_day_and_retain_latest_ten_days(client):
     lease = acquire_lock(client, key)
     base = datetime(2026, 1, 1, 10, 0, tzinfo=timezone.utc)
 
-    assert upload_persistent(client, key, lease, b"day-1-a", now=base).status_code == 201
-    assert upload_persistent(client, key, lease, b"day-1-b", now=base + timedelta(hours=2)).status_code == 201
+    first_upload = upload_persistent(client, key, lease, b"day-1-a", now=base)
+    assert first_upload.status_code == 201
+    with client.app.state.SessionLocal() as db:
+        first_object_path = db.scalar(
+            select(PersistentVersion.object_path).where(PersistentVersion.profile_id == profile["id"])
+        )
+    object_root = client.app.state.storage.root
+    assert (object_root / first_object_path).exists()
+
+    second_upload = upload_persistent(client, key, lease, b"day-1-b", now=base + timedelta(hours=2))
+    assert second_upload.status_code == 201
     backups = client.get("/v1/persistent/backups", headers={"X-MAS-Profile-Key": key}).json()["items"]
     assert len(backups) == 1
     assert backups[0]["backup_date"] == "2026-01-01"
+    assert second_upload.json()["id"] == first_upload.json()["id"]
+
+    with client.app.state.SessionLocal() as db:
+        versions = list(
+            db.scalars(select(PersistentVersion).where(PersistentVersion.profile_id == profile["id"]))
+        )
+        backup_rows = list(
+            db.scalars(select(PersistentDailyBackup).where(PersistentDailyBackup.profile_id == profile["id"]))
+        )
+        current = db.scalar(select(PersistentCurrent).where(PersistentCurrent.profile_id == profile["id"]))
+    assert len(versions) == 1
+    assert len(backup_rows) == 1
+    assert current.version_id == versions[0].id == backup_rows[0].version_id
+    assert versions[0].sha256 == second_upload.json()["sha256"]
+    assert not (object_root / first_object_path).exists()
+    assert (object_root / versions[0].object_path).exists()
+    assert list((object_root / str(profile["id"])).rglob("*.bin")) == [object_root / versions[0].object_path]
+
+    current_download = client.get("/v1/persistent/download", headers={"X-MAS-Profile-Key": key})
+    assert current_download.status_code == 200
+    assert current_download.content == b"day-1-b"
+    backup_download = client.get(
+        f"/account/profiles/{profile['id']}/persistent/backups/{backups[0]['id']}/download"
+    )
+    assert backup_download.status_code == 200
+    assert backup_download.content == b"day-1-b"
 
     for day in range(1, 11):
         response = upload_persistent(

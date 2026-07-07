@@ -234,26 +234,6 @@ def store_upload(
     now: datetime,
 ) -> PersistentVersion:
     sha = hashlib.sha256(data).hexdigest()
-    version = PersistentVersion(
-        profile_id=profile.id,
-        object_path="pending",
-        sha256=sha,
-        size=len(data),
-        renpy_version=renpy_version,
-        mas_version=mas_version,
-        created_at=now,
-    )
-    db.add(version)
-    db.flush()
-    version.object_path = storage.put(profile.id, version.id, sha, data)
-
-    current = db.get(PersistentCurrent, profile.id)
-    if current is None:
-        db.add(PersistentCurrent(profile_id=profile.id, version_id=version.id, updated_at=now))
-    else:
-        current.version_id = version.id
-        current.updated_at = now
-
     backup_date = now.date()
     backup = db.scalar(
         select(PersistentDailyBackup).where(
@@ -261,7 +241,20 @@ def store_upload(
             PersistentDailyBackup.backup_date == backup_date,
         )
     )
+
+    old_object_path = None
     if backup is None:
+        version = PersistentVersion(
+            profile_id=profile.id,
+            object_path="pending",
+            sha256=sha,
+            size=len(data),
+            renpy_version=renpy_version,
+            mas_version=mas_version,
+            created_at=now,
+        )
+        db.add(version)
+        db.flush()
         db.add(
             PersistentDailyBackup(
                 profile_id=profile.id,
@@ -271,11 +264,30 @@ def store_upload(
             )
         )
     else:
-        backup.version_id = version.id
+        version = db.get(PersistentVersion, backup.version_id)
+        if version is None:
+            raise HTTPException(status_code=500, detail={"code": "persistent_version_missing"})
+        old_object_path = version.object_path
+        version.sha256 = sha
+        version.size = len(data)
+        version.renpy_version = renpy_version
+        version.mas_version = mas_version
+        version.created_at = now
         backup.created_at = now
+
+    version.object_path = storage.put(profile.id, version.id, sha, data)
+
+    current = db.get(PersistentCurrent, profile.id)
+    if current is None:
+        db.add(PersistentCurrent(profile_id=profile.id, version_id=version.id, updated_at=now))
+    else:
+        current.version_id = version.id
+        current.updated_at = now
 
     profile.last_upload_at = now
     db.flush()
+    if old_object_path is not None and old_object_path != version.object_path:
+        storage.delete(old_object_path)
     prune_backups(db, profile.id)
     return version
 
