@@ -24,6 +24,7 @@ from .services import (
     generate_profile_key,
     get_profile_by_key,
     profile_payload,
+    profile_storage_usage,
     request_now,
     require_current_version,
     require_lock,
@@ -83,7 +84,7 @@ def create_app(settings: Settings | None = None, flarum_client=None) -> FastAPI:
         profiles = list(
             db.scalars(select(Profile).where(Profile.user_id == user.id).order_by(Profile.id))
         )
-        return {"items": [profile_payload(profile) for profile in profiles]}
+        return {"items": [profile_payload(profile, profile_storage_usage(db, profile.id)) for profile in profiles]}
 
     @app.post("/account/profile-keys", status_code=201)
     def create_profile_key(
@@ -111,7 +112,7 @@ def create_app(settings: Settings | None = None, flarum_client=None) -> FastAPI:
             target_profile_key_id=profile.id,
         )
         db.commit()
-        return profile_payload(profile)
+        return profile_payload(profile, profile_storage_usage(db, profile.id))
 
     @app.post("/account/profile-keys/{profile_id}/refresh")
     def refresh_profile_key(
@@ -135,7 +136,7 @@ def create_app(settings: Settings | None = None, flarum_client=None) -> FastAPI:
             target_profile_key_id=profile.id,
         )
         db.commit()
-        return profile_payload(profile)
+        return profile_payload(profile, profile_storage_usage(db, profile.id))
 
     @app.delete("/account/profile-keys/{profile_id}", status_code=204)
     def delete_account_profile_key(
@@ -160,7 +161,7 @@ def create_app(settings: Settings | None = None, flarum_client=None) -> FastAPI:
     @app.get("/account/profiles/{profile_id}")
     def get_account_profile(profile_id: int, user: User = Depends(current_user), db: Session = Depends(get_db)):
         profile = owned_profile_or_404(db, profile_id, user)
-        return {"profile": profile_payload(profile)}
+        return {"profile": profile_payload(profile, profile_storage_usage(db, profile.id))}
 
     @app.get("/account/profiles/{profile_id}/persistent/current")
     def account_persistent_current(profile_id: int, user: User = Depends(current_user), db: Session = Depends(get_db)):
@@ -222,7 +223,7 @@ def create_app(settings: Settings | None = None, flarum_client=None) -> FastAPI:
         profile_key: str | None = Header(default=None, alias="X-MAS-Profile-Key"),
     ):
         profile = profile_from_header(request, db, profile_key)
-        return {"profile": profile_payload(profile)}
+        return {"profile": profile_payload(profile, profile_storage_usage(db, profile.id))}
 
     @app.post("/v1/locks/acquire")
     def acquire_lock(
@@ -393,14 +394,24 @@ def create_app(settings: Settings | None = None, flarum_client=None) -> FastAPI:
         profiles = list(db.scalars(select(Profile).where(Profile.user_id == target.id).order_by(Profile.id)))
         audit(db, request, actor, "admin.user.view", target_user_id=target.id)
         db.commit()
-        return {"user": user_payload(target), "profiles": [profile_payload(profile) for profile in profiles]}
+        return {
+            "user": user_payload(target),
+            "profiles": [profile_payload(profile, profile_storage_usage(db, profile.id)) for profile in profiles],
+        }
 
     @app.get("/admin/profiles/{profile_id}")
     def admin_get_profile(profile_id: int, _: User = Depends(admin_user), db: Session = Depends(get_db)):
         profile = db.get(Profile, profile_id)
         if profile is None:
             raise HTTPException(status_code=404, detail={"code": "profile_not_found"})
-        return {"profile": profile_payload(profile)}
+        return {"profile": profile_payload(profile, profile_storage_usage(db, profile.id))}
+
+    @app.get("/admin/profiles/{profile_id}/persistent/current")
+    def admin_persistent_current(profile_id: int, _: User = Depends(admin_user), db: Session = Depends(get_db)):
+        profile = db.get(Profile, profile_id)
+        if profile is None:
+            raise HTTPException(status_code=404, detail={"code": "profile_not_found"})
+        return version_payload(require_current_version(db, profile.id))
 
     @app.get("/admin/profiles/{profile_id}/persistent/current/download")
     def admin_download_current(
@@ -416,6 +427,19 @@ def create_app(settings: Settings | None = None, flarum_client=None) -> FastAPI:
         audit(db, request, actor, "admin.persistent.current.download", target_user_id=profile.user_id, target_profile_id=profile.id)
         db.commit()
         return StreamingResponse(iter([request.app.state.storage.get(version.object_path)]), media_type="application/octet-stream")
+
+    @app.get("/admin/profiles/{profile_id}/persistent/backups")
+    def admin_list_backups(profile_id: int, _: User = Depends(admin_user), db: Session = Depends(get_db)):
+        profile = db.get(Profile, profile_id)
+        if profile is None:
+            raise HTTPException(status_code=404, detail={"code": "profile_not_found"})
+        rows = db.execute(
+            select(PersistentDailyBackup, PersistentVersion)
+            .join(PersistentVersion, PersistentVersion.id == PersistentDailyBackup.version_id)
+            .where(PersistentDailyBackup.profile_id == profile.id)
+            .order_by(desc(PersistentDailyBackup.backup_date))
+        ).all()
+        return {"items": [backup_payload(backup, version) for backup, version in rows]}
 
     @app.get("/admin/profiles/{profile_id}/persistent/backups/{backup_id}/download")
     def admin_download_backup(
@@ -534,7 +558,7 @@ def create_app(settings: Settings | None = None, flarum_client=None) -> FastAPI:
         profile.profile_key_plaintext = generate_profile_key()
         audit(db, request, actor, "admin.profile_key.refresh", target_user_id=profile.user_id, target_profile_id=profile.id, target_profile_key_id=profile.id)
         db.commit()
-        return profile_payload(profile)
+        return profile_payload(profile, profile_storage_usage(db, profile.id))
 
     @app.delete("/admin/profile-keys/{key_id}", status_code=204)
     def admin_delete_key(key_id: int, request: Request, actor: User = Depends(admin_user), db: Session = Depends(get_db)):

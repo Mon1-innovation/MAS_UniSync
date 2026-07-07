@@ -1,4 +1,5 @@
 import {Box, Button, Text} from '@primer/react'
+import {SearchIcon} from '@primer/octicons-react'
 import {useEffect, useMemo, useState} from 'react'
 import {useNavigate} from 'react-router-dom'
 import {ApiError} from '../../api/client'
@@ -79,7 +80,10 @@ export function AdminUsersPage() {
           <Text as="h1">Admin users</Text>
           <Text as="p">Review account state, sync usage, bans, and active locks.</Text>
         </Box>
-        <input className="search-input" value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Search users" />
+        <Box className="search-box">
+          <SearchIcon size={16} aria-hidden="true" />
+          <input className="search-input" value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Search users" />
+        </Box>
       </Box>
       {error ? <ErrorBanner title="Access denied" message={error} /> : null}
       {isLoading ? <LoadingState /> : null}

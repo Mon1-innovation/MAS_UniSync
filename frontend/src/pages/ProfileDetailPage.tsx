@@ -117,6 +117,9 @@ export function ProfileDetailPage() {
             <Box className="meta-line">
               Last used <RelativeTime value={profile.last_used_at} />
             </Box>
+            <Box className="info-grid" sx={{mt: 3}}>
+              <Info label="Profile file size" value={<ByteSize value={profile.storage_usage} />} />
+            </Box>
           </Box>
 
           <Box className="panel">

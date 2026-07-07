@@ -427,6 +427,12 @@ describe('App', () => {
       if (input === '/admin/profiles/9') {
         return json({profile})
       }
+      if (input === '/admin/profiles/9/persistent/current') {
+        return json({detail: {code: 'no_current_persistent'}}, {status: 404})
+      }
+      if (input === '/admin/profiles/9/persistent/backups') {
+        return json({items: []})
+      }
       if (input === '/admin/profile-keys/9' && init?.method === 'DELETE') {
         return new Response(null, {status: 204})
       }
@@ -469,6 +475,12 @@ describe('App', () => {
       if (input === '/admin/profiles/9') {
         return json({profile})
       }
+      if (input === '/admin/profiles/9/persistent/current') {
+        return json({detail: {code: 'no_current_persistent'}}, {status: 404})
+      }
+      if (input === '/admin/profiles/9/persistent/backups') {
+        return json({items: []})
+      }
       if (input === '/admin/profile-keys/9' && init?.method === 'DELETE') {
         return json({detail: {code: 'delete_failed'}}, {status: 500})
       }
@@ -509,6 +521,12 @@ describe('App', () => {
       if (input === '/admin/profiles/9') {
         return json({profile})
       }
+      if (input === '/admin/profiles/9/persistent/current') {
+        return json({detail: {code: 'no_current_persistent'}}, {status: 404})
+      }
+      if (input === '/admin/profiles/9/persistent/backups') {
+        return json({items: []})
+      }
       if (input === '/admin/profile-keys/9' && init?.method === 'DELETE') {
         return new Response(null, {status: 204})
       }
@@ -532,6 +550,156 @@ describe('App', () => {
 
     await expect(screen.findAllByText('Player')).resolves.not.toHaveLength(0)
     expect(fetch).toHaveBeenCalledWith('/admin/profile-keys/9', {credentials: 'include', headers: {}, method: 'DELETE'})
+  })
+
+  it('shows current persistent metadata and lists backups directly on the admin profile page', async () => {
+    localStorage.setItem('mas_unisync_user', JSON.stringify(adminUser))
+    Object.defineProperty(URL, 'createObjectURL', {
+      configurable: true,
+      value: vi.fn(() => 'blob:download'),
+    })
+    Object.defineProperty(URL, 'revokeObjectURL', {
+      configurable: true,
+      value: vi.fn(),
+    })
+    vi.spyOn(HTMLAnchorElement.prototype, 'click').mockImplementation(() => undefined)
+    const profile = {
+      id: 9,
+      user_id: 2,
+      display_name: 'Main',
+      profile_key: 'maspk_main',
+      revoked_at: null,
+      last_used_at: '2026-07-07T08:30:00',
+      last_upload_at: '2026-07-07T09:00:00',
+      created_at: '2026-07-07T08:00:00',
+      storage_usage: 12,
+    }
+    mockFetch((input, init) => {
+      if (input === '/account/profile-keys') {
+        return json({items: []})
+      }
+      if (input === '/admin/profiles/9') {
+        return json({profile})
+      }
+      if (input === '/admin/profiles/9/persistent/current') {
+        return json({
+          id: 22,
+          profile_id: 9,
+          sha256: 'sha-current',
+          size: 12,
+          renpy_version: '8.2.3',
+          mas_version: '0.12.15',
+          created_at: '2026-07-07T09:00:00',
+        })
+      }
+      if (input === '/admin/profiles/9/persistent/backups') {
+        return json({
+          items: [
+            {
+              id: 5,
+              backup_date: '2026-07-07',
+              version_id: 22,
+              profile_id: 9,
+              sha256: 'sha-backup',
+              size: 12,
+              renpy_version: '8.2.3',
+              mas_version: '0.12.15',
+              created_at: '2026-07-07T09:00:00',
+            },
+          ],
+        })
+      }
+      if (input === '/admin/profiles/9/persistent/backups/5/download') {
+        return blob('backup-bytes')
+      }
+      if (input === '/admin/profiles/9/persistent/current/download') {
+        return blob('current-bytes')
+      }
+      if (input === '/admin/profiles/9/persistent/backups/5/restore' && init?.method === 'POST') {
+        return json({
+          id: 22,
+          profile_id: 9,
+          sha256: 'sha-backup',
+          size: 12,
+          renpy_version: '8.2.3',
+          mas_version: '0.12.15',
+          created_at: '2026-07-07T09:00:00',
+        })
+      }
+      return json({detail: {code: 'not_found'}}, {status: 404})
+    })
+
+    render(
+      <MemoryRouter initialEntries={['/admin/profiles/9']}>
+        <App />
+      </MemoryRouter>,
+    )
+
+    await expect(screen.findByRole('heading', {level: 1, name: 'Main'})).resolves.toBeInTheDocument()
+    expect(screen.getByText('Profile file size')).toBeInTheDocument()
+    expect(screen.getByText('Current persistent')).toBeInTheDocument()
+    expect(screen.getByText(/version #22/i)).toBeInTheDocument()
+    expect(screen.getAllByText('12 B').length).toBeGreaterThanOrEqual(1)
+    expect(screen.getByText('sha-current')).toBeInTheDocument()
+    expect(await screen.findByText('2026-07-07')).toBeInTheDocument()
+    expect(screen.getByText('sha-backup')).toBeInTheDocument()
+    expect(screen.queryByLabelText(/backup id/i)).not.toBeInTheDocument()
+
+    await userEvent.click(screen.getByRole('button', {name: /download current/i}))
+    await userEvent.click(screen.getByRole('button', {name: /download backup 2026-07-07/i}))
+    await userEvent.click(screen.getByRole('button', {name: /restore backup 2026-07-07/i}))
+
+    expect(fetch).toHaveBeenCalledWith('/admin/profiles/9/persistent/current', {credentials: 'include', headers: {}})
+    expect(fetch).toHaveBeenCalledWith('/admin/profiles/9/persistent/current/download', {credentials: 'include'})
+    expect(fetch).toHaveBeenCalledWith('/admin/profiles/9/persistent/backups', {credentials: 'include', headers: {}})
+    expect(fetch).toHaveBeenCalledWith('/admin/profiles/9/persistent/backups/5/download', {credentials: 'include'})
+    expect(fetch).toHaveBeenCalledWith('/admin/profiles/9/persistent/backups/5/restore', {
+      credentials: 'include',
+      headers: {},
+      method: 'POST',
+    })
+  })
+
+  it('shows an empty current persistent state on the admin profile page', async () => {
+    localStorage.setItem('mas_unisync_user', JSON.stringify(adminUser))
+    const profile = {
+      id: 9,
+      user_id: 2,
+      display_name: 'Main',
+      profile_key: 'maspk_main',
+      revoked_at: null,
+      last_used_at: null,
+      last_upload_at: null,
+      created_at: '2026-07-07T08:00:00',
+      storage_usage: 0,
+    }
+    mockFetch((input) => {
+      if (input === '/account/profile-keys') {
+        return json({items: []})
+      }
+      if (input === '/admin/profiles/9') {
+        return json({profile})
+      }
+      if (input === '/admin/profiles/9/persistent/current') {
+        return json({detail: {code: 'no_current_persistent'}}, {status: 404})
+      }
+      if (input === '/admin/profiles/9/persistent/backups') {
+        return json({items: []})
+      }
+      return json({detail: {code: 'not_found'}}, {status: 404})
+    })
+
+    render(
+      <MemoryRouter initialEntries={['/admin/profiles/9']}>
+        <App />
+      </MemoryRouter>,
+    )
+
+    await expect(screen.findByRole('heading', {level: 1, name: 'Main'})).resolves.toBeInTheDocument()
+    expect(screen.getByText('No current persistent')).toBeInTheDocument()
+    expect(screen.getByText('This profile does not have an uploaded persistent file yet.')).toBeInTheDocument()
+    expect(screen.queryByText(/could not load this profile/i)).not.toBeInTheDocument()
+    expect(screen.queryByRole('button', {name: /download current/i})).not.toBeInTheDocument()
   })
 
   it('links profile keys to owned persistent files and downloads them', async () => {
@@ -558,6 +726,7 @@ describe('App', () => {
               last_used_at: '2026-07-07T08:30:00',
               last_upload_at: '2026-07-07T09:00:00',
               created_at: '2026-07-07T08:00:00',
+              storage_usage: 12,
             },
           ],
         })
@@ -573,6 +742,7 @@ describe('App', () => {
             last_used_at: '2026-07-07T08:30:00',
             last_upload_at: '2026-07-07T09:00:00',
             created_at: '2026-07-07T08:00:00',
+            storage_usage: 12,
           },
         })
       }
@@ -624,6 +794,8 @@ describe('App', () => {
     await userEvent.click(filesLink)
 
     await expect(screen.findByRole('heading', {level: 1, name: 'Main'})).resolves.toBeInTheDocument()
+    expect(screen.getByText('Profile file size')).toBeInTheDocument()
+    expect(screen.getAllByText('12 B').length).toBeGreaterThanOrEqual(1)
     expect(screen.getAllByText('sha-current').length).toBeGreaterThanOrEqual(1)
     expect(screen.getByText('2026-07-07')).toBeInTheDocument()
 

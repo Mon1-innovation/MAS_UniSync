@@ -1,5 +1,5 @@
 import {downloadBlob, request} from './client'
-import type {AdminUserListItem, AuditLog, ListResponse, Profile, ProfileResponse, StatusResponse, UserResponse, Version} from './types'
+import type {AdminUserListItem, AuditLog, Backup, ListResponse, Profile, ProfileResponse, StatusResponse, UserResponse, Version} from './types'
 
 export function listAdminUsers() {
   return request<ListResponse<AdminUserListItem>>('/admin/users')
@@ -62,8 +62,16 @@ export function restoreAdminBackup(profileId: number, backupId: number) {
   return request<Version>(`/admin/profiles/${profileId}/persistent/backups/${backupId}/restore`, {method: 'POST'})
 }
 
+export function getAdminCurrentPersistent(profileId: number) {
+  return request<Version>(`/admin/profiles/${profileId}/persistent/current`)
+}
+
 export function downloadCurrentPersistent(profileId: number) {
   return downloadBlob(`/admin/profiles/${profileId}/persistent/current/download`)
+}
+
+export function listAdminBackups(profileId: number) {
+  return request<ListResponse<Backup>>(`/admin/profiles/${profileId}/persistent/backups`)
 }
 
 export function downloadBackupPersistent(profileId: number, backupId: number) {

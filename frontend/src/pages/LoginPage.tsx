@@ -1,4 +1,5 @@
 import {Box, Button, Text} from '@primer/react'
+import {DatabaseIcon} from '@primer/octicons-react'
 import {useState} from 'react'
 import {ApiError} from '../api/client'
 import {useAuth} from '../auth/AuthProvider'
@@ -31,9 +32,14 @@ export function LoginPage() {
   return (
     <Box className="login-page">
       <Box className="login-card">
-        <Text as="h1" sx={{fontSize: 4, mb: 1}}>
-          MAS UniSync
-        </Text>
+        <Box className="login-brand">
+          <span className="brand-mark" aria-hidden="true">
+            <DatabaseIcon size={18} />
+          </span>
+          <Text as="h1" sx={{fontSize: 4, m: 0}}>
+            MAS UniSync
+          </Text>
+        </Box>
         <Text as="p" sx={{color: 'fg.muted', mt: 0, mb: 3}}>
           Sign in with your Flarum account.
         </Text>

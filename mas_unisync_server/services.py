@@ -66,12 +66,13 @@ def user_payload(user: User) -> dict:
     }
 
 
-def profile_payload(profile: Profile) -> dict:
+def profile_payload(profile: Profile, storage_usage: int = 0) -> dict:
     return {
         "id": profile.id,
         "user_id": profile.user_id,
         "display_name": profile.display_name,
         "profile_key": profile.profile_key_plaintext,
+        "storage_usage": storage_usage,
         "revoked_at": iso(profile.revoked_at),
         "last_used_at": iso(profile.last_used_at),
         "last_upload_at": iso(profile.last_upload_at),

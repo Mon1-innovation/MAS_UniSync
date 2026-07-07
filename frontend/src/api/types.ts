@@ -24,6 +24,7 @@ export interface Profile {
   user_id: number
   display_name: string | null
   profile_key: string
+  storage_usage: number
   revoked_at: string | null
   last_used_at: string | null
   last_upload_at: string | null

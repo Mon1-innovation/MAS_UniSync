@@ -136,9 +136,11 @@ def test_invalid_flarum_login_returns_401(client):
 
 def test_non_admin_user_gets_user_role_and_admin_apis_forbidden(client):
     result = login(client, "user@example.com")
+    profile = new_profile(client)
 
     assert result["user"]["role"] == "user"
     assert client.get("/admin/users").status_code == 403
+    assert client.get(f"/admin/profiles/{profile['id']}/persistent/current").status_code == 403
 
 
 def test_profile_key_generation_lists_plaintext_and_refresh_invalidates_old_key(client):
@@ -299,6 +301,7 @@ def test_account_profile_detail_exposes_owned_persistent_files(client):
     detail = client.get(f"/account/profiles/{profile['id']}")
     assert detail.status_code == 200
     assert detail.json()["profile"]["id"] == profile["id"]
+    assert detail.json()["profile"]["storage_usage"] == len(b"second")
 
     current = client.get(f"/account/profiles/{profile['id']}/persistent/current")
     assert current.status_code == 200
@@ -317,6 +320,46 @@ def test_account_profile_detail_exposes_owned_persistent_files(client):
     backup_download = client.get(f"/account/profiles/{profile['id']}/persistent/backups/{items[-1]['id']}/download")
     assert backup_download.status_code == 200
     assert backup_download.content == b"first"
+
+
+def test_admin_profile_detail_lists_persistent_backups(client):
+    profile = new_profile(client)
+    key = profile["profile_key"]
+    lease = acquire_lock(client, key)
+    base = datetime(2026, 1, 1, tzinfo=timezone.utc)
+    first = upload_persistent(client, key, lease, b"first", now=base)
+    assert first.status_code == 201
+    second = upload_persistent(client, key, lease, b"second", now=base + timedelta(days=1))
+    assert second.status_code == 201
+
+    client.post("/logout")
+    login(client, "admin@example.com")
+
+    detail = client.get(f"/admin/profiles/{profile['id']}")
+    assert detail.status_code == 200
+    assert detail.json()["profile"]["storage_usage"] == len(b"second")
+
+    current = client.get(f"/admin/profiles/{profile['id']}/persistent/current")
+    assert current.status_code == 200
+    assert current.json()["sha256"] == second.json()["sha256"]
+
+    backups = client.get(f"/admin/profiles/{profile['id']}/persistent/backups")
+
+    assert backups.status_code == 200
+    items = backups.json()["items"]
+    assert [item["backup_date"] for item in items] == ["2026-01-02", "2026-01-01"]
+    assert items[0]["sha256"] == second.json()["sha256"]
+
+
+def test_admin_profile_current_returns_no_current_code(client):
+    profile = new_profile(client)
+    client.post("/logout")
+    login(client, "admin@example.com")
+
+    current = client.get(f"/admin/profiles/{profile['id']}/persistent/current")
+
+    assert current.status_code == 404
+    assert current.json()["detail"]["code"] == "no_current_persistent"
 
 
 def test_account_profile_detail_rejects_profiles_owned_by_other_users(client):

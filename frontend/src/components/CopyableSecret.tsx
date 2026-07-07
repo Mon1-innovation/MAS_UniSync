@@ -12,7 +12,7 @@ export function CopyableSecret({value}: {value: string}) {
   }
 
   return (
-    <Box className="copyable-secret">
+    <Box className={`copyable-secret ${copied ? 'is-copied' : ''}`}>
       <Text as="code">{value}</Text>
       <Button type="button" size="small" leadingVisual={CopyIcon} aria-label="Copy profile key" onClick={copy}>
         {copied ? 'Copied' : 'Copy'}

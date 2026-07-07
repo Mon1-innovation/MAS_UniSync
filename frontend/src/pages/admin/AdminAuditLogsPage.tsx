@@ -1,4 +1,5 @@
 import {Box, Text} from '@primer/react'
+import {SearchIcon} from '@primer/octicons-react'
 import {useEffect, useMemo, useState} from 'react'
 import {Link} from 'react-router-dom'
 import {listAuditLogs} from '../../api/adminApi'
@@ -56,7 +57,10 @@ export function AdminAuditLogsPage() {
           <Text as="h1">Audit logs</Text>
           <Text as="p">Recent administrative and profile-key activity.</Text>
         </Box>
-        <input className="search-input" value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Filter action or target" />
+        <Box className="search-box">
+          <SearchIcon size={16} aria-hidden="true" />
+          <input className="search-input" value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Filter action or target" />
+        </Box>
       </Box>
       {error ? <ErrorBanner message={error} /> : null}
       {isLoading ? <LoadingState /> : null}
