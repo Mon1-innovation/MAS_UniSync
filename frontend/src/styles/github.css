@@ -185,6 +185,15 @@ a:hover {
   align-items: flex-start;
 }
 
+.section-heading,
+.table-heading {
+  display: flex;
+  justify-content: space-between;
+  gap: 16px;
+  align-items: flex-start;
+  margin-bottom: 16px;
+}
+
 .copyable-secret {
   display: flex;
   align-items: center;
@@ -295,6 +304,18 @@ thead th {
   border-radius: 6px;
 }
 
+.empty-inline {
+  padding: 12px;
+  color: #57606a;
+  background: #f6f8fa;
+  border: 1px solid #d8dee4;
+  border-radius: 6px;
+}
+
+.empty-inline p {
+  margin: 4px 0 0;
+}
+
 .info-cell span,
 .muted,
 .meta-line {
@@ -340,7 +361,9 @@ thead th {
   }
 
   .row-actions,
-  .copyable-secret {
+  .copyable-secret,
+  .section-heading,
+  .table-heading {
     align-items: stretch;
   }
 }

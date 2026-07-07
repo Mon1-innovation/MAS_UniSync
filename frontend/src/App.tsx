@@ -5,6 +5,7 @@ import {RequireAdmin} from './auth/RequireAdmin'
 import {RequireAuth} from './auth/RequireAuth'
 import {AppShell} from './layout/AppShell'
 import {LoginPage} from './pages/LoginPage'
+import {ProfileDetailPage} from './pages/ProfileDetailPage'
 import {ProfileKeysPage} from './pages/ProfileKeysPage'
 import {AdminAuditLogsPage} from './pages/admin/AdminAuditLogsPage'
 import {AdminProfileDetailPage} from './pages/admin/AdminProfileDetailPage'
@@ -26,6 +27,16 @@ export function App() {
                 <RequireAuth>
                   <AppShell>
                     <ProfileKeysPage />
+                  </AppShell>
+                </RequireAuth>
+              }
+            />
+            <Route
+              path="/account/profiles/:profileId"
+              element={
+                <RequireAuth>
+                  <AppShell>
+                    <ProfileDetailPage />
                   </AppShell>
                 </RequireAuth>
               }

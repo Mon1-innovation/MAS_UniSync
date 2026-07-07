@@ -1,5 +1,5 @@
-import {request} from './client'
-import type {ListResponse, Profile} from './types'
+import {downloadBlob, request} from './client'
+import type {Backup, ListResponse, Profile, ProfileResponse, Version} from './types'
 
 export function listProfileKeys() {
   return request<ListResponse<Profile>>('/account/profile-keys')
@@ -18,4 +18,24 @@ export function refreshProfileKey(profileId: number) {
 
 export function revokeProfileKey(profileId: number) {
   return request<Profile>(`/account/profile-keys/${profileId}/revoke`, {method: 'POST'})
+}
+
+export function getAccountProfile(profileId: number) {
+  return request<ProfileResponse>(`/account/profiles/${profileId}`)
+}
+
+export function getAccountCurrentPersistent(profileId: number) {
+  return request<Version>(`/account/profiles/${profileId}/persistent/current`)
+}
+
+export function listAccountBackups(profileId: number) {
+  return request<ListResponse<Backup>>(`/account/profiles/${profileId}/persistent/backups`)
+}
+
+export function downloadAccountCurrentPersistent(profileId: number) {
+  return downloadBlob(`/account/profiles/${profileId}/persistent/current/download`)
+}
+
+export function downloadAccountBackupPersistent(profileId: number, backupId: number) {
+  return downloadBlob(`/account/profiles/${profileId}/persistent/backups/${backupId}/download`)
 }

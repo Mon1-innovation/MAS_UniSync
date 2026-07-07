@@ -1,6 +1,7 @@
 import {Box, Button, Text} from '@primer/react'
-import {KeyIcon, PlusIcon, SyncIcon, TrashIcon} from '@primer/octicons-react'
+import {FileDirectoryIcon, KeyIcon, PlusIcon, SyncIcon, TrashIcon} from '@primer/octicons-react'
 import {useEffect, useMemo, useState} from 'react'
+import {Link} from 'react-router-dom'
 import {createProfileKey, listProfileKeys, refreshProfileKey, revokeProfileKey} from '../api/profileKeysApi'
 import type {Profile} from '../api/types'
 import {ConfirmDialog} from '../components/ConfirmDialog'
@@ -118,6 +119,9 @@ export function ProfileKeysPage() {
               <CopyableSecret value={profile.profile_key} />
             </Box>
             <Box className="row-actions">
+              <Button as={Link} to={`/account/profiles/${profile.id}`} size="small" leadingVisual={FileDirectoryIcon}>
+                View files
+              </Button>
               <Button
                 type="button"
                 size="small"

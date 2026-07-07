@@ -36,6 +36,13 @@ function json(data: unknown, init?: ResponseInit) {
   })
 }
 
+function blob(data: string) {
+  return new Response(data, {
+    status: 200,
+    headers: {'Content-Type': 'application/octet-stream'},
+  })
+}
+
 describe('App', () => {
   beforeEach(() => {
     localStorage.clear()
@@ -43,6 +50,7 @@ describe('App', () => {
 
   afterEach(() => {
     vi.restoreAllMocks()
+    vi.unstubAllGlobals()
   })
 
   it('logs in and redirects users to profile keys', async () => {
@@ -256,6 +264,169 @@ describe('App', () => {
     await userEvent.click(screen.getByRole('button', {name: /revoke key/i}))
     await userEvent.click(await screen.findByRole('button', {name: /^revoke$/i}))
     await expect(screen.findByText(/revoked/i)).resolves.toBeInTheDocument()
+  })
+
+  it('links profile keys to owned persistent files and downloads them', async () => {
+    localStorage.setItem('mas_unisync_user', JSON.stringify(normalUser))
+    Object.defineProperty(URL, 'createObjectURL', {
+      configurable: true,
+      value: vi.fn(() => 'blob:download'),
+    })
+    Object.defineProperty(URL, 'revokeObjectURL', {
+      configurable: true,
+      value: vi.fn(),
+    })
+    vi.spyOn(HTMLAnchorElement.prototype, 'click').mockImplementation(() => undefined)
+    mockFetch((input, init) => {
+      if (input === '/account/profile-keys' && !init?.method) {
+        return json({
+          items: [
+            {
+              id: 9,
+              user_id: 2,
+              display_name: 'Main',
+              profile_key: 'maspk_main',
+              revoked_at: null,
+              last_used_at: '2026-07-07T08:30:00',
+              last_upload_at: '2026-07-07T09:00:00',
+              created_at: '2026-07-07T08:00:00',
+            },
+          ],
+        })
+      }
+      if (input === '/account/profiles/9') {
+        return json({
+          profile: {
+            id: 9,
+            user_id: 2,
+            display_name: 'Main',
+            profile_key: 'maspk_main',
+            revoked_at: null,
+            last_used_at: '2026-07-07T08:30:00',
+            last_upload_at: '2026-07-07T09:00:00',
+            created_at: '2026-07-07T08:00:00',
+          },
+        })
+      }
+      if (input === '/account/profiles/9/persistent/current') {
+        return json({
+          id: 22,
+          profile_id: 9,
+          sha256: 'sha-current',
+          size: 12,
+          renpy_version: '8.2.3',
+          mas_version: '0.12.15',
+          created_at: '2026-07-07T09:00:00',
+        })
+      }
+      if (input === '/account/profiles/9/persistent/backups') {
+        return json({
+          items: [
+            {
+              id: 5,
+              backup_date: '2026-07-07',
+              version_id: 22,
+              profile_id: 9,
+              sha256: 'sha-current',
+              size: 12,
+              renpy_version: '8.2.3',
+              mas_version: '0.12.15',
+              created_at: '2026-07-07T09:00:00',
+            },
+          ],
+        })
+      }
+      if (input === '/account/profiles/9/persistent/current/download') {
+        return blob('current-bytes')
+      }
+      if (input === '/account/profiles/9/persistent/backups/5/download') {
+        return blob('backup-bytes')
+      }
+      return json({detail: {code: 'not_found'}}, {status: 404})
+    })
+
+    render(
+      <MemoryRouter initialEntries={['/account/profile-keys']}>
+        <App />
+      </MemoryRouter>,
+    )
+
+    const filesLink = await screen.findByRole('link', {name: /view files/i})
+    expect(filesLink).toHaveAttribute('href', '/account/profiles/9')
+    await userEvent.click(filesLink)
+
+    await expect(screen.findByRole('heading', {level: 1, name: 'Main'})).resolves.toBeInTheDocument()
+    expect(screen.getAllByText('sha-current').length).toBeGreaterThanOrEqual(1)
+    expect(screen.getByText('2026-07-07')).toBeInTheDocument()
+
+    await userEvent.click(screen.getByRole('button', {name: /download current/i}))
+    await userEvent.click(screen.getByRole('button', {name: /download backup 2026-07-07/i}))
+
+    expect(fetch).toHaveBeenCalledWith('/account/profiles/9/persistent/current/download', {credentials: 'include'})
+    expect(fetch).toHaveBeenCalledWith('/account/profiles/9/persistent/backups/5/download', {credentials: 'include'})
+  })
+
+  it('shows an empty current file state for profiles without persistent uploads', async () => {
+    localStorage.setItem('mas_unisync_user', JSON.stringify(normalUser))
+    mockFetch((input) => {
+      if (input === '/account/profile-keys') {
+        return json({items: []})
+      }
+      if (input === '/account/profiles/10') {
+        return json({
+          profile: {
+            id: 10,
+            user_id: 2,
+            display_name: 'Fresh profile',
+            profile_key: 'maspk_empty',
+            revoked_at: null,
+            last_used_at: null,
+            last_upload_at: null,
+            created_at: '2026-07-07T08:00:00',
+          },
+        })
+      }
+      if (input === '/account/profiles/10/persistent/current') {
+        return json({detail: {code: 'no_current_persistent'}}, {status: 404})
+      }
+      if (input === '/account/profiles/10/persistent/backups') {
+        return json({items: []})
+      }
+      return json({detail: {code: 'not_found'}}, {status: 404})
+    })
+
+    render(
+      <MemoryRouter initialEntries={['/account/profiles/10']}>
+        <App />
+      </MemoryRouter>,
+    )
+
+    await expect(screen.findByRole('heading', {level: 1, name: 'Fresh profile'})).resolves.toBeInTheDocument()
+    expect(screen.getByText('maspk_empty')).toBeInTheDocument()
+    expect(screen.getByText(/no current persistent/i)).toBeInTheDocument()
+    expect(screen.queryByText(/could not load this profile/i)).not.toBeInTheDocument()
+  })
+
+  it('shows a specific message when an account profile is not owned by the user', async () => {
+    localStorage.setItem('mas_unisync_user', JSON.stringify(normalUser))
+    mockFetch((input) => {
+      if (input === '/account/profile-keys') {
+        return json({items: []})
+      }
+      if (input === '/account/profiles/1') {
+        return json({detail: {code: 'profile_not_found'}}, {status: 404})
+      }
+      return json({detail: {code: 'not_found'}}, {status: 404})
+    })
+
+    render(
+      <MemoryRouter initialEntries={['/account/profiles/1']}>
+        <App />
+      </MemoryRouter>,
+    )
+
+    await expect(screen.findByText(/profile was not found for your account/i)).resolves.toBeInTheDocument()
+    expect(screen.queryByText(/could not load this profile/i)).not.toBeInTheDocument()
   })
 
   it('links audit target profile ids to profile detail routes', async () => {

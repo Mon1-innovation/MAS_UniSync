@@ -20,7 +20,6 @@ from .services import (
     aware,
     backup_payload,
     banned_exception,
-    current_version,
     generate_profile_key,
     get_profile_by_key,
     profile_payload,
@@ -71,6 +70,12 @@ def create_app(settings: Settings | None = None, flarum_client=None) -> FastAPI:
     def logout(request: Request):
         request.session.clear()
         return Response(status_code=204)
+
+    def owned_profile_or_404(db: Session, profile_id: int, user: User) -> Profile:
+        profile = db.get(Profile, profile_id)
+        if profile is None or profile.user_id != user.id:
+            raise HTTPException(status_code=404, detail={"code": "profile_not_found"})
+        return profile
 
     @app.get("/account/profile-keys")
     def list_profile_keys(user: User = Depends(current_user), db: Session = Depends(get_db)):
@@ -153,6 +158,59 @@ def create_app(settings: Settings | None = None, flarum_client=None) -> FastAPI:
         )
         db.commit()
         return profile_payload(profile)
+
+    @app.get("/account/profiles/{profile_id}")
+    def get_account_profile(profile_id: int, user: User = Depends(current_user), db: Session = Depends(get_db)):
+        profile = owned_profile_or_404(db, profile_id, user)
+        return {"profile": profile_payload(profile)}
+
+    @app.get("/account/profiles/{profile_id}/persistent/current")
+    def account_persistent_current(profile_id: int, user: User = Depends(current_user), db: Session = Depends(get_db)):
+        profile = owned_profile_or_404(db, profile_id, user)
+        return version_payload(require_current_version(db, profile.id))
+
+    @app.get("/account/profiles/{profile_id}/persistent/current/download")
+    def account_download_current(
+        profile_id: int,
+        request: Request,
+        user: User = Depends(current_user),
+        db: Session = Depends(get_db),
+    ):
+        profile = owned_profile_or_404(db, profile_id, user)
+        version = require_current_version(db, profile.id)
+        return StreamingResponse(
+            iter([request.app.state.storage.get(version.object_path)]),
+            media_type="application/octet-stream",
+        )
+
+    @app.get("/account/profiles/{profile_id}/persistent/backups")
+    def account_list_backups(profile_id: int, user: User = Depends(current_user), db: Session = Depends(get_db)):
+        profile = owned_profile_or_404(db, profile_id, user)
+        rows = db.execute(
+            select(PersistentDailyBackup, PersistentVersion)
+            .join(PersistentVersion, PersistentVersion.id == PersistentDailyBackup.version_id)
+            .where(PersistentDailyBackup.profile_id == profile.id)
+            .order_by(desc(PersistentDailyBackup.backup_date))
+        ).all()
+        return {"items": [backup_payload(backup, version) for backup, version in rows]}
+
+    @app.get("/account/profiles/{profile_id}/persistent/backups/{backup_id}/download")
+    def account_download_backup(
+        profile_id: int,
+        backup_id: int,
+        request: Request,
+        user: User = Depends(current_user),
+        db: Session = Depends(get_db),
+    ):
+        profile = owned_profile_or_404(db, profile_id, user)
+        backup = db.scalar(select(PersistentDailyBackup).where(PersistentDailyBackup.id == backup_id, PersistentDailyBackup.profile_id == profile.id))
+        if backup is None:
+            raise HTTPException(status_code=404, detail={"code": "backup_not_found"})
+        version = db.get(PersistentVersion, backup.version_id)
+        return StreamingResponse(
+            iter([request.app.state.storage.get(version.object_path)]),
+            media_type="application/octet-stream",
+        )
 
     def profile_from_header(request: Request, db: Session, profile_key: str | None) -> Profile:
         profile = get_profile_by_key(db, profile_key, request_now(request), check_ban=True)
