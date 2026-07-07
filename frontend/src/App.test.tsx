@@ -1,0 +1,297 @@
+import {render, screen, waitFor} from '@testing-library/react'
+import userEvent from '@testing-library/user-event'
+import {afterEach, beforeEach, describe, expect, it, vi} from 'vitest'
+import {MemoryRouter} from 'react-router-dom'
+import {App} from './App'
+import type {User} from './api/types'
+
+const adminUser: User = {
+  id: 1,
+  flarum_user_id: 10,
+  username: 'admin',
+  display_name: 'Admin User',
+  avatar_url: 'https://example.test/admin.png',
+  role: 'admin',
+  last_login_at: '2026-07-07T08:00:00',
+}
+
+const normalUser: User = {
+  ...adminUser,
+  id: 2,
+  flarum_user_id: 20,
+  username: 'player',
+  display_name: 'Player',
+  role: 'user',
+}
+
+function mockFetch(handler: (input: RequestInfo | URL, init?: RequestInit) => Response | Promise<Response>) {
+  globalThis.fetch = vi.fn((input: RequestInfo | URL, init?: RequestInit) => Promise.resolve(handler(input, init)))
+}
+
+function json(data: unknown, init?: ResponseInit) {
+  return new Response(JSON.stringify(data), {
+    status: 200,
+    headers: {'Content-Type': 'application/json'},
+    ...init,
+  })
+}
+
+describe('App', () => {
+  beforeEach(() => {
+    localStorage.clear()
+  })
+
+  afterEach(() => {
+    vi.restoreAllMocks()
+  })
+
+  it('logs in and redirects users to profile keys', async () => {
+    mockFetch((input, init) => {
+      if (input === '/login/flarum' && init?.method === 'POST') {
+        return json({user: normalUser})
+      }
+      if (input === '/account/profile-keys') {
+        return json({items: []})
+      }
+      return json({detail: {code: 'not_found'}}, {status: 404})
+    })
+
+    render(
+      <MemoryRouter initialEntries={['/login']}>
+        <App />
+      </MemoryRouter>,
+    )
+
+    await userEvent.type(screen.getByLabelText(/flarum account/i), 'player')
+    await userEvent.type(screen.getByLabelText(/password/i), 'secret')
+    await userEvent.click(screen.getByRole('button', {name: /sign in/i}))
+
+    await expect(screen.findByRole('heading', {level: 1, name: /profile keys/i})).resolves.toBeInTheDocument()
+    expect(JSON.parse(localStorage.getItem('mas_unisync_user') || '{}')).toMatchObject({username: 'player'})
+  })
+
+  it('shows invalid credential errors', async () => {
+    mockFetch((input) => {
+      if (input === '/login/flarum') {
+        return json({detail: {code: 'invalid_flarum_credentials'}}, {status: 401})
+      }
+      return json({detail: {code: 'not_found'}}, {status: 404})
+    })
+
+    render(
+      <MemoryRouter initialEntries={['/login']}>
+        <App />
+      </MemoryRouter>,
+    )
+
+    await userEvent.type(screen.getByLabelText(/flarum account/i), 'player')
+    await userEvent.type(screen.getByLabelText(/password/i), 'bad')
+    await userEvent.click(screen.getByRole('button', {name: /sign in/i}))
+
+    await expect(screen.findByText(/flarum credentials are invalid/i)).resolves.toBeInTheDocument()
+  })
+
+  it('hides admin navigation for non-admin users', async () => {
+    localStorage.setItem('mas_unisync_user', JSON.stringify(normalUser))
+    mockFetch((input) => {
+      if (input === '/account/profile-keys') {
+        return json({items: []})
+      }
+      return json({detail: {code: 'not_found'}}, {status: 404})
+    })
+
+    render(
+      <MemoryRouter initialEntries={['/account/profile-keys']}>
+        <App />
+      </MemoryRouter>,
+    )
+
+    await waitFor(() => expect(screen.getByRole('heading', {name: /profile keys/i})).toBeInTheDocument())
+    expect(screen.queryByRole('link', {name: /^admin$/i})).not.toBeInTheDocument()
+  })
+
+  it('logs out and clears the cached user', async () => {
+    localStorage.setItem('mas_unisync_user', JSON.stringify(normalUser))
+    mockFetch((input, init) => {
+      if (input === '/account/profile-keys') {
+        return json({items: []})
+      }
+      if (input === '/logout' && init?.method === 'POST') {
+        return new Response(null, {status: 204})
+      }
+      return json({detail: {code: 'not_found'}}, {status: 404})
+    })
+
+    render(
+      <MemoryRouter initialEntries={['/account/profile-keys']}>
+        <App />
+      </MemoryRouter>,
+    )
+
+    await userEvent.click(await screen.findByRole('button', {name: /sign out/i}))
+
+    await expect(screen.findByRole('button', {name: /sign in/i})).resolves.toBeInTheDocument()
+    expect(localStorage.getItem('mas_unisync_user')).toBeNull()
+  })
+
+  it('creates profile keys with the submitted display name', async () => {
+    localStorage.setItem('mas_unisync_user', JSON.stringify(normalUser))
+    let submittedBody: unknown
+    mockFetch(async (input, init) => {
+      if (input === '/account/profile-keys' && !init?.method) {
+        return json({items: []})
+      }
+      if (input === '/account/profile-keys' && init?.method === 'POST') {
+        submittedBody = JSON.parse(String(init.body))
+        return json(
+          {
+            id: 10,
+            user_id: 2,
+            display_name: 'Laptop',
+            profile_key: 'maspk_created',
+            revoked_at: null,
+            last_used_at: null,
+            last_upload_at: null,
+            created_at: '2026-07-07T08:00:00',
+          },
+          {status: 201},
+        )
+      }
+      return json({detail: {code: 'not_found'}}, {status: 404})
+    })
+
+    render(
+      <MemoryRouter initialEntries={['/account/profile-keys']}>
+        <App />
+      </MemoryRouter>,
+    )
+
+    await userEvent.click(await screen.findByRole('button', {name: /new profile key/i}))
+    await userEvent.type(screen.getByLabelText(/display name/i), 'Laptop')
+    await userEvent.click(screen.getByRole('button', {name: /create key/i}))
+
+    await expect(screen.findByText('maspk_created')).resolves.toBeInTheDocument()
+    expect(submittedBody).toEqual({display_name: 'Laptop'})
+  })
+
+  it('renders access denied when the admin API returns 403', async () => {
+    localStorage.setItem('mas_unisync_user', JSON.stringify(adminUser))
+    mockFetch((input) => {
+      if (input === '/account/profile-keys') {
+        return json({items: []})
+      }
+      if (input === '/admin/users') {
+        return json({detail: {code: 'admin_required'}}, {status: 403})
+      }
+      return json({detail: {code: 'not_found'}}, {status: 404})
+    })
+
+    render(
+      <MemoryRouter initialEntries={['/admin/users']}>
+        <App />
+      </MemoryRouter>,
+    )
+
+    await expect(screen.findByText(/does not have access to the admin area/i)).resolves.toBeInTheDocument()
+    expect(screen.queryByRole('link', {name: /^admin$/i})).not.toBeInTheDocument()
+  })
+
+  it('updates a refreshed profile key and marks revoked rows', async () => {
+    localStorage.setItem('mas_unisync_user', JSON.stringify(normalUser))
+    mockFetch((input, init) => {
+      if (input === '/account/profile-keys' && !init?.method) {
+        return json({
+          items: [
+            {
+              id: 9,
+              user_id: 2,
+              display_name: 'Main',
+              profile_key: 'maspk_old',
+              revoked_at: null,
+              last_used_at: null,
+              last_upload_at: null,
+              created_at: '2026-07-07T08:00:00',
+            },
+          ],
+        })
+      }
+      if (input === '/account/profile-keys/9/refresh') {
+        return json({
+          id: 9,
+          user_id: 2,
+          display_name: 'Main',
+          profile_key: 'maspk_new',
+          revoked_at: null,
+          last_used_at: null,
+          last_upload_at: null,
+          created_at: '2026-07-07T08:00:00',
+        })
+      }
+      if (input === '/account/profile-keys/9/revoke') {
+        return json({
+          id: 9,
+          user_id: 2,
+          display_name: 'Main',
+          profile_key: 'maspk_new',
+          revoked_at: '2026-07-07T09:00:00',
+          last_used_at: null,
+          last_upload_at: null,
+          created_at: '2026-07-07T08:00:00',
+        })
+      }
+      return json({detail: {code: 'not_found'}}, {status: 404})
+    })
+
+    render(
+      <MemoryRouter initialEntries={['/account/profile-keys']}>
+        <App />
+      </MemoryRouter>,
+    )
+
+    await expect(screen.findByText('maspk_old')).resolves.toBeInTheDocument()
+    await userEvent.click(screen.getByRole('button', {name: /refresh key/i}))
+    await userEvent.click(await screen.findByRole('button', {name: /^refresh$/i}))
+    await expect(screen.findByText('maspk_new')).resolves.toBeInTheDocument()
+
+    await userEvent.click(screen.getByRole('button', {name: /revoke key/i}))
+    await userEvent.click(await screen.findByRole('button', {name: /^revoke$/i}))
+    await expect(screen.findByText(/revoked/i)).resolves.toBeInTheDocument()
+  })
+
+  it('links audit target profile ids to profile detail routes', async () => {
+    localStorage.setItem('mas_unisync_user', JSON.stringify(adminUser))
+    mockFetch((input) => {
+      if (input === '/account/profile-keys') {
+        return json({items: []})
+      }
+      if (input === '/admin/audit-logs') {
+        return json({
+          items: [
+            {
+              id: 1,
+              actor_user_id: 1,
+              actor_role: 'admin',
+              action: 'admin.profile.ban',
+              target_user_id: 2,
+              target_profile_id: 42,
+              target_profile_key_id: 42,
+              ip_address: '127.0.0.1',
+              user_agent: 'test',
+              created_at: '2026-07-07T08:00:00',
+            },
+          ],
+        })
+      }
+      return json({detail: {code: 'not_found'}}, {status: 404})
+    })
+
+    render(
+      <MemoryRouter initialEntries={['/admin/audit-logs']}>
+        <App />
+      </MemoryRouter>,
+    )
+
+    const link = await screen.findByRole('link', {name: '#42'})
+    expect(link).toHaveAttribute('href', '/admin/profiles/42')
+  })
+})
