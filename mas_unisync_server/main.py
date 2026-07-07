@@ -392,9 +392,10 @@ def create_app(settings: Settings | None = None, flarum_client=None) -> FastAPI:
         target = db.get(User, user_id)
         if target is None:
             raise HTTPException(status_code=404, detail={"code": "user_not_found"})
+        profiles = list(db.scalars(select(Profile).where(Profile.user_id == target.id).order_by(Profile.id)))
         audit(db, request, actor, "admin.user.view", target_user_id=target.id)
         db.commit()
-        return {"user": user_payload(target)}
+        return {"user": user_payload(target), "profiles": [profile_payload(profile) for profile in profiles]}
 
     @app.get("/admin/profiles/{profile_id}")
     def admin_get_profile(profile_id: int, _: User = Depends(admin_user), db: Session = Depends(get_db)):

@@ -1,11 +1,12 @@
 import {Box, Button, Text} from '@primer/react'
 import {BlockedIcon, ShieldCheckIcon} from '@primer/octicons-react'
 import {useEffect, useState} from 'react'
-import {useNavigate, useParams} from 'react-router-dom'
+import {Link, useNavigate, useParams} from 'react-router-dom'
 import {banUser, getAdminUser, unbanUser} from '../../api/adminApi'
-import type {User} from '../../api/types'
+import type {Profile, User} from '../../api/types'
 import {AvatarName} from '../../components/AvatarName'
 import {ConfirmDialog} from '../../components/ConfirmDialog'
+import {EmptyState} from '../../components/EmptyState'
 import {ErrorBanner} from '../../components/ErrorBanner'
 import {LoadingState} from '../../components/LoadingState'
 import {RelativeTime} from '../../components/RelativeTime'
@@ -17,6 +18,7 @@ export function AdminUserDetailPage() {
   const {userId} = useParams()
   const numericUserId = Number(userId)
   const [user, setUser] = useState<User | null>(null)
+  const [profiles, setProfiles] = useState<Profile[]>([])
   const [error, setError] = useState<string | null>(null)
   const [pendingAction, setPendingAction] = useState<PendingAction>(null)
   const [isBusy, setIsBusy] = useState(false)
@@ -29,7 +31,10 @@ export function AdminUserDetailPage() {
       return
     }
     getAdminUser(numericUserId)
-      .then((response) => setUser(response.user))
+      .then((response) => {
+        setUser(response.user)
+        setProfiles(response.profiles ?? [])
+      })
       .catch(() => setError('Could not load this user.'))
   }, [numericUserId])
 
@@ -73,6 +78,52 @@ export function AdminUserDetailPage() {
             <Info label="Display name" value={user.display_name || 'Unset'} />
             <Info label="Role" value={<StatusLabel status={user.role} />} />
             <Info label="Last login" value={<RelativeTime value={user.last_login_at} />} />
+          </Box>
+          <Box className="table-panel">
+            <Box className="table-heading">
+              <Text as="h2">Profiles</Text>
+            </Box>
+            {profiles.length === 0 ? (
+              <EmptyState title="No profiles" message="This user has not created any profiles." />
+            ) : (
+              <table>
+                <thead>
+                  <tr>
+                    <th>Profile</th>
+                    <th>Status</th>
+                    <th>Created</th>
+                    <th>Last used</th>
+                    <th>Last upload</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {profiles.map((profile) => (
+                    <tr key={profile.id} className="clickable-row" onClick={() => navigate(`/admin/profiles/${profile.id}`)}>
+                      <td>
+                        <Link to={`/admin/profiles/${profile.id}`} onClick={(event) => event.stopPropagation()}>
+                          {profile.display_name || `Profile #${profile.id}`}
+                        </Link>
+                        <Text as="div" sx={{color: 'fg.muted', fontSize: 0}}>
+                          #{profile.id}
+                        </Text>
+                      </td>
+                      <td>
+                        <StatusLabel status={profile.revoked_at ? 'revoked' : 'active'} />
+                      </td>
+                      <td>
+                        <RelativeTime value={profile.created_at} />
+                      </td>
+                      <td>
+                        <RelativeTime value={profile.last_used_at} />
+                      </td>
+                      <td>
+                        <RelativeTime value={profile.last_upload_at} />
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            )}
           </Box>
           <Box className="panel">
             <Text as="h2" sx={{fontSize: 2, mt: 0}}>

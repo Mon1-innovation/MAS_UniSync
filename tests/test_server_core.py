@@ -381,6 +381,32 @@ def test_admin_actions_write_audit_logs_with_request_context(client):
     assert any(entry["user_agent"] == "pytest-agent" for entry in logs)
 
 
+def test_admin_user_detail_includes_only_target_users_profiles_sorted_by_id(client):
+    first = new_profile(client)
+    second = client.post("/account/profile-keys", json={"display_name": "Alt"}).json()
+
+    client.post("/logout")
+    login(client, "admin@example.com")
+    admin_profile = client.post("/account/profile-keys", json={"display_name": "Admin profile"}).json()
+
+    client.post("/logout")
+    normal_user = login(client, "user@example.com")["user"]
+    client.post("/logout")
+    login(client, "admin@example.com")
+
+    response = client.get(f"/admin/users/{normal_user['id']}")
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["user"]["id"] == normal_user["id"]
+    profile_ids = [profile["id"] for profile in payload["profiles"]]
+    assert profile_ids == sorted([first["id"], second["id"]])
+    assert admin_profile["id"] not in profile_ids
+    assert payload["profiles"][0]["user_id"] == normal_user["id"]
+    assert payload["profiles"][0]["display_name"] == "Main"
+    assert payload["profiles"][0]["profile_key"] == first["profile_key"]
+
+
 def test_admin_user_list_includes_profile_count_storage_last_upload_and_lock_status(client):
     profile = new_profile(client)
     key = profile["profile_key"]

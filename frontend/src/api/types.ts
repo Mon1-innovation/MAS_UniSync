@@ -75,6 +75,7 @@ export interface LoginResponse {
 
 export interface UserResponse {
   user: User
+  profiles: Profile[]
 }
 
 export interface ProfileResponse {

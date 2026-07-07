@@ -204,6 +204,72 @@ describe('App', () => {
     expect(screen.queryByRole('link', {name: /^admin$/i})).not.toBeInTheDocument()
   })
 
+  it('renders profiles on admin user detail and links to profile detail', async () => {
+    localStorage.setItem('mas_unisync_user', JSON.stringify(adminUser))
+    const profile = {
+      id: 11,
+      user_id: 2,
+      display_name: 'Desktop',
+      profile_key: 'maspk_desktop',
+      revoked_at: null,
+      last_used_at: '2026-07-07T08:30:00',
+      last_upload_at: '2026-07-07T09:00:00',
+      created_at: '2026-07-07T08:00:00',
+    }
+    mockFetch((input) => {
+      if (input === '/account/profile-keys') {
+        return json({items: []})
+      }
+      if (input === '/admin/users/2') {
+        return json({user: normalUser, profiles: [profile]})
+      }
+      if (input === '/admin/profiles/11') {
+        return json({profile})
+      }
+      return json({detail: {code: 'not_found'}}, {status: 404})
+    })
+
+    render(
+      <MemoryRouter initialEntries={['/admin/users/2']}>
+        <App />
+      </MemoryRouter>,
+    )
+
+    const link = await screen.findByRole('link', {name: /desktop/i})
+    expect(link).toHaveAttribute('href', '/admin/profiles/11')
+    expect(screen.getByText('active')).toBeInTheDocument()
+    expect(document.querySelector('time[datetime="2026-07-07T08:00:00"]')).toBeInTheDocument()
+    expect(document.querySelector('time[datetime="2026-07-07T08:30:00"]')).toBeInTheDocument()
+    expect(document.querySelector('time[datetime="2026-07-07T09:00:00"]')).toBeInTheDocument()
+
+    await userEvent.click(link)
+    await waitFor(() => {
+      expect(fetch).toHaveBeenCalledWith('/admin/profiles/11', {credentials: 'include', headers: {}})
+    })
+  })
+
+  it('keeps admin user detail visible when profiles are missing from the response', async () => {
+    localStorage.setItem('mas_unisync_user', JSON.stringify(adminUser))
+    mockFetch((input) => {
+      if (input === '/account/profile-keys') {
+        return json({items: []})
+      }
+      if (input === '/admin/users/2') {
+        return json({user: normalUser})
+      }
+      return json({detail: {code: 'not_found'}}, {status: 404})
+    })
+
+    render(
+      <MemoryRouter initialEntries={['/admin/users/2']}>
+        <App />
+      </MemoryRouter>,
+    )
+
+    await expect(screen.findAllByText('Player')).resolves.not.toHaveLength(0)
+    expect(screen.getByText('No profiles')).toBeInTheDocument()
+  })
+
   it('updates a refreshed profile key and marks revoked rows', async () => {
     localStorage.setItem('mas_unisync_user', JSON.stringify(normalUser))
     mockFetch((input, init) => {
