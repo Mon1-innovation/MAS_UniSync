@@ -24,16 +24,20 @@ export function ProfileKeysPage() {
   const [pendingAction, setPendingAction] = useState<PendingAction>(null)
   const [isBusy, setIsBusy] = useState(false)
 
-  useEffect(() => {
+ useEffect(() => {
     let cancelled = false
     listProfileKeys()
       .then((response) => {
         if (!cancelled) {
-          setProfiles(response.items)
+          console.log('[ProfileKeysPage] API response:', response)
+          console.log('[ProfileKeysPage] response.items:', response?.items)
+          console.log('[ProfileKeysPage] Array.isArray(items):', Array.isArray(response?.items))
+          setProfiles(Array.isArray(response.items) ? response.items : [])
         }
       })
-      .catch(() => {
+      .catch((err) => {
         if (!cancelled) {
+          console.log('[ProfileKeysPage] API error:', err)
           setError('Could not load profile keys.')
         }
       })
@@ -47,7 +51,7 @@ export function ProfileKeysPage() {
     }
   }, [])
 
-  const sortedProfiles = useMemo(() => [...profiles].sort((a, b) => a.id - b.id), [profiles])
+  const sortedProfiles = useMemo(() => (Array.isArray(profiles) ? [...profiles].sort((a, b) => a.id - b.id) : []), [profiles])
 
   function replaceProfile(nextProfile: Profile) {
     setProfiles((current) => current.map((profile) => (profile.id === nextProfile.id ? nextProfile : profile)))

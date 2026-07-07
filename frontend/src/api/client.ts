@@ -52,9 +52,12 @@ function buildRequestInit(options: RequestOptions): RequestInit {
     body = JSON.stringify(body)
   }
 
+  headers['Cache-Control'] = 'no-cache'
+ 
   return {
     ...options,
     credentials: 'include',
+    cache: 'no-store',
     headers,
     body,
   }

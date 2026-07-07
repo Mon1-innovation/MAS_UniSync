@@ -54,6 +54,16 @@ def generate_profile_key() -> str:
     return "maspk_" + secrets.token_urlsafe(32)
 
 
+def sanitize_version(value: str | None) -> str | None:
+    """Strip Python object reprs (e.g. '<function version at 0x...>') sent by buggy clients."""
+    if value is None:
+        return None
+    stripped = value.strip()
+    if stripped.startswith('<') and stripped.endswith('>'):
+        return None
+    return stripped or None
+
+
 def user_payload(user: User) -> dict:
     return {
         "id": user.id,
@@ -249,8 +259,8 @@ def store_upload(
             object_path="pending",
             sha256=sha,
             size=len(data),
-            renpy_version=renpy_version,
-            mas_version=mas_version,
+            renpy_version=sanitize_version(renpy_version),
+            mas_version=sanitize_version(mas_version),
             created_at=now,
         )
         db.add(version)
@@ -270,8 +280,8 @@ def store_upload(
         old_object_path = version.object_path
         version.sha256 = sha
         version.size = len(data)
-        version.renpy_version = renpy_version
-        version.mas_version = mas_version
+        version.renpy_version = sanitize_version(renpy_version)
+        version.mas_version = sanitize_version(mas_version)
         version.created_at = now
         backup.created_at = now
 
