@@ -25,6 +25,39 @@ def test_renpy_compat_uses_python2_safe_module_names():
     assert 'sys.modules.get(b"renpy.python")' in compat_source
 
 
+def test_persistent_reload_runs_after_mas_api_keys_init_not_python_early():
+    compat_source = Path("game/Submods/MAS_UniSync/00_compat.rpy").read_text(
+        encoding="utf-8"
+    )
+    hooks_source = Path("game/Submods/MAS_UniSync/hooks.rpy").read_text(
+        encoding="utf-8"
+    )
+
+    assert "early_sync_persistent" not in compat_source
+    assert "MAS_UniSync: early sync starting" not in compat_source
+    assert "init -968 python:" in hooks_source
+    assert "def mas_unisync_reload_persistent_after_api_keys():" in hooks_source
+    assert "mas_unisync_reload_persistent_after_api_keys()" in hooks_source
+    assert "mas_unisync_core.reload_persistent_from_remote(" in hooks_source
+    assert "mas_unisync_get_host()" in hooks_source
+    assert "mas_unisync_get_profile_key()" in hooks_source
+    assert "except mas_unisync_core.UniSyncError:" in hooks_source
+    assert hooks_source.index("mas_unisync_reload_persistent_after_api_keys()") < hooks_source.index("mas_unisync_startup_sync(force=True)")
+
+
+def test_persistent_reload_keeps_direct_in_memory_replacement():
+    core_source = Path("game/Submods/MAS_UniSync/mas_unisync_core.py").read_text(
+        encoding="utf-8"
+    )
+
+    assert "def reload_persistent_from_remote(api_url, profile_key, savedir, early_log=None):" in core_source
+    assert "early_load_api_keys" not in core_source
+    assert "load_pickle_payload(_s)" in core_source
+    assert "renpy.game.persistent.__dict__.clear()" in core_source
+    assert "renpy.game.persistent.__dict__.update(remote_persistent.__dict__)" in core_source
+    assert "renpy.game.persistent._update()" in core_source
+
+
 def test_submod_http_does_not_import_uuid_module_missing_from_renpy_699():
     http_source = Path("game/Submods/MAS_UniSync/mas_unisync_http.py").read_text(
         encoding="utf-8"
@@ -44,7 +77,8 @@ def test_startup_sync_does_not_abort_mas_when_profile_key_is_invalid():
     assert "def mas_unisync_startup_sync(force=False, raise_on_failure=False, upload_after_sync=False):" in hooks_source
     assert "if raise_on_failure:" in hooks_source
     assert "                raise" in hooks_source
-    assert "mas_unisync_startup_sync()" in hooks_source
+    assert "if _api_url and _profile_key:" in hooks_source
+    assert "mas_unisync_startup_sync(force=True)" in hooks_source
     assert "mas_unisync_startup_sync(force=True, raise_on_failure=True, upload_after_sync=True)" in header_source
     assert "mas_unisync_startup_sync(force=True, raise_on_failure=True)" in hooks_source
 

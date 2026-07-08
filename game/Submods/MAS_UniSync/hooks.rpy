@@ -1,4 +1,5 @@
 init -968 python:
+    import mas_unisync_sync
     import os
     import sys
     import threading
@@ -90,6 +91,30 @@ init -968 python:
             mas_unisync_update_status(mas_unisync_session.status)
             if raise_on_failure:
                 raise
+            return None
+
+    def mas_unisync_reload_persistent_after_api_keys():
+        _api_url = mas_unisync_get_host()
+        _profile_key = mas_unisync_get_profile_key()
+        if not _api_url or not _profile_key:
+            return None
+        try:
+            _early_log = None
+            try:
+                _early_log = store.mas_submod_utils.submod_log
+            except Exception:
+                pass
+            return mas_unisync_core.reload_persistent_from_remote(
+                _api_url,
+                _profile_key,
+                mas_unisync_savedir(),
+                early_log=_early_log,
+            )
+        except mas_unisync_core.UniSyncError:
+            raise
+        except Exception as exc:
+            mas_unisync_core.submod_log_debug(str(exc))
+            mas_unisync_update_status(message=mas_unisync_core.renpy_safe_text(str(exc)))
             return None
 
     def mas_unisync_validate_persistent_for_upload(raise_on_failure=False):
@@ -209,9 +234,16 @@ init -968 python:
 
     mas_unisync_cleanup_for_renpy6()
     mas_unisync_install_save_hook()
-    # If startup sync fails for any reason (lock unavailable, network error, etc.),
-    # propagate the exception to block game load entirely.
-    mas_unisync_startup_sync()
+
+    mas_unisync_reload_persistent_after_api_keys()
+
+    # If API keys are configured, start a fresh session after direct reload.
+    if mas_unisync_session is None:
+        _api_url = mas_unisync_get_host()
+        _profile_key = mas_unisync_get_profile_key()
+        if _api_url and _profile_key:
+            mas_unisync_session = mas_unisync_make_session()
+            mas_unisync_startup_sync(force=True)
 
 init python:
     @store.mas_submod_utils.functionplugin("_quit", priority=-100)

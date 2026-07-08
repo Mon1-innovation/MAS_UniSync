@@ -63,6 +63,90 @@ def test_http_error_description_prefers_machine_readable_detail():
     assert http.describe_error_body(b"") == "no response body"
 
 
+def test_release_lock_uses_python2_compatible_post_request(monkeypatch):
+    core = load_client_module("mas_unisync_core")
+    monkeypatch.syspath_prepend(str(CLIENT_DIR))
+
+    from urllib import request as urllib_request
+
+    requests = []
+
+    class Python2StyleRequest:
+        def __init__(self, url, data=None, headers=None):
+            self.full_url = url
+            self.data = data
+            self.headers = headers or {}
+
+    class FakeResponse:
+        def getcode(self):
+            return 204
+
+        def read(self):
+            return b""
+
+        def close(self):
+            pass
+
+    def fake_urlopen(request, timeout):
+        requests.append(request)
+        return FakeResponse()
+
+    monkeypatch.setattr(urllib_request, "Request", Python2StyleRequest)
+    monkeypatch.setattr(urllib_request, "urlopen", fake_urlopen)
+
+    core._release_lock(
+        "https://api.example.test/root",
+        {"X-MAS-Profile-Key": "profile", "X-MAS-Lease-Token": "lease"},
+        early_log=None,
+    )
+
+    assert len(requests) == 1
+    assert requests[0].full_url == "https://api.example.test/root/v1/locks/release"
+    assert requests[0].get_method() == "POST"
+
+
+def test_reload_persistent_raises_readable_error_when_lock_is_held(monkeypatch, tmp_path):
+    core = load_client_module("mas_unisync_core")
+    monkeypatch.setitem(sys.modules, "renpy", object())
+
+    class LockHeldError(Exception):
+        status = 409
+        code = "lock_held"
+
+    class FakeHTTP:
+        def request_json(self, method, url, headers=None, data=None, timeout=30):
+            if url.endswith("/v1/profile/resolve"):
+                return {}
+            if url.endswith("/v1/locks/acquire"):
+                raise LockHeldError("raw HTTP 409 lock_held payload")
+            raise AssertionError("unexpected URL {0}".format(url))
+
+    monkeypatch.setattr(core, "_load_http_module", lambda: FakeHTTP())
+
+    with pytest.raises(core.UniSyncError) as exc_info:
+        core.reload_persistent_from_remote(
+            "http://100.72.137.92:8000",
+            "maspk_test",
+            str(tmp_path),
+        )
+
+    message = str(exc_info.value)
+    assert "sync lock is held by another client" in message
+    assert "wait about 60 seconds" in message
+    assert "raw HTTP" not in message
+    assert "lock_held" not in message
+
+
+def test_load_pickle_payload_accepts_python2_datetime_binary_state():
+    core = load_client_module("mas_unisync_core")
+    py2_datetime_pickle = (
+        b"\x80\x02cdatetime\ndatetime\nq\x00U\n"
+        b"\x07\xea\x07\x08\x0f5\x11\x00\x00\x00q\x01\x85q\x02Rq\x03."
+    )
+
+    assert core.load_pickle_payload(py2_datetime_pickle) == dt.datetime(2026, 7, 8, 15, 53, 17)
+
+
 def test_display_text_escapes_braces_used_by_renpy_substitution():
     core = load_client_module("mas_unisync_core")
 
