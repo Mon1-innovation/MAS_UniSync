@@ -28,15 +28,15 @@ init -990 python:
         settings_pane="mas_unisync_settingpane"
     )
 
-default persistent._mas_unisync_status = {
-    "sync_status": "disabled",
-    "lock_state": "unlocked",
-    "last_upload_at": "",
-    "last_download_at": "",
-    "last_error": "",
-}
-
 init -989 python:
+    mas_unisync_status = {
+        "sync_status": "disabled",
+        "lock_state": "unlocked",
+        "last_upload_at": "",
+        "last_download_at": "",
+        "last_error": "",
+    }
+
     def mas_unisync_get_host():
         try:
             value = store.mas_getAPIKey(mas_unisync_core.HOST_FEATURE)
@@ -120,24 +120,25 @@ init -989 python:
         except Exception:
             pass
         mas_unisync_update_status(message="")
-        persistent._mas_unisync_status["sync_status"] = "disabled"
-        persistent._mas_unisync_status["lock_state"] = "unlocked"
+        mas_unisync_status["sync_status"] = "disabled"
+        mas_unisync_status["lock_state"] = "unlocked"
         renpy.restart_interaction()
 
     def mas_unisync_open_profile_keys():
         webbrowser.open_new(mas_unisync_core.portal_profile_keys_url(mas_unisync_get_host()))
 
     def mas_unisync_update_status(status_obj=None, message=None):
-        if not isinstance(persistent._mas_unisync_status, dict):
-            persistent._mas_unisync_status = {}
+        global mas_unisync_status
+        if not isinstance(mas_unisync_status, dict):
+            mas_unisync_status = {}
         if status_obj is not None:
-            persistent._mas_unisync_status["sync_status"] = "enabled" if status_obj.enabled else "disabled"
-            persistent._mas_unisync_status["lock_state"] = status_obj.lock_state
-            persistent._mas_unisync_status["last_upload_at"] = status_obj.last_upload_at
-            persistent._mas_unisync_status["last_download_at"] = status_obj.last_download_at
-            persistent._mas_unisync_status["last_error"] = status_obj.last_error
+            mas_unisync_status["sync_status"] = "enabled" if status_obj.enabled else "disabled"
+            mas_unisync_status["lock_state"] = status_obj.lock_state
+            mas_unisync_status["last_upload_at"] = status_obj.last_upload_at
+            mas_unisync_status["last_download_at"] = status_obj.last_download_at
+            mas_unisync_status["last_error"] = status_obj.last_error
         if message is not None:
-            persistent._mas_unisync_status["last_error"] = message
+            mas_unisync_status["last_error"] = message
 
     def mas_unisync_profile_key_on_change(profile_key):
         if not profile_key:
@@ -167,7 +168,7 @@ init -969 python:
 
 screen mas_unisync_settingpane():
     python:
-        _status = persistent._mas_unisync_status if isinstance(persistent._mas_unisync_status, dict) else {}
+        _status = mas_unisync_status if isinstance(mas_unisync_status, dict) else {}
         _host = mas_unisync_get_host()
         _key = mas_unisync_get_profile_key()
         _masked_key = _key[:12] + "..." if len(_key) > 15 else _key
@@ -206,6 +207,9 @@ screen mas_unisync_settingpane():
         if _display_last_error:
             text _("Error: ") + _display_last_error:
                 style "main_menu_version"
+            text _("(Details in submod_log)"):
+                style "main_menu_version"
+                size 12
 
         hbox:
             spacing 12

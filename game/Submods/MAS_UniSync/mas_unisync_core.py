@@ -45,8 +45,39 @@ class SyncStatus(object):
         self.last_error = ""
 
     def mark_error(self, message):
+        if isinstance(message, Exception):
+            self.last_error = text_type(type(message).__name__)
+        elif isinstance(message, str):
+            self.last_error = text_type(message)
+        else:
+            self.last_error = text_type(message)
+
+    def mark_error_full(self, message):
         self.last_error = text_type(message)
 
+
+def submod_log_debug(message):
+    """Log debug message to MAS submod log (safe no-op if unavailable)."""
+    try:
+        store.mas_submod_utils.submod_log.debug(str(message))
+    except Exception:
+        pass
+
+
+def submod_log_error(message):
+    """Log error message to MAS submod log (safe no-op if unavailable)."""
+    try:
+        store.mas_submod_utils.submod_log.error(str(message))
+    except Exception:
+        pass
+
+
+def submod_log_info(message):
+    """Log info message to MAS submod log (safe no-op if unavailable)."""
+    try:
+        store.mas_submod_utils.submod_log.info(str(message))
+    except Exception:
+        pass
 
 def text_type(value):
     try:
@@ -169,3 +200,12 @@ def get_persistent_path(savedir):
 
 def get_backup_dir(savedir):
     return os.path.join(savedir, "MAS_UniSync_Backups")
+
+
+
+
+
+
+
+
+

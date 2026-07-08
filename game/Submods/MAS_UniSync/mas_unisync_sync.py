@@ -72,7 +72,17 @@ class SyncSession(object):
         return self.request_json("GET", "/v1/profile/resolve", headers=self.headers())
 
     def acquire_lock(self):
-        payload = self.request_json("POST", "/v1/locks/acquire", headers=self.headers(), data=b"")
+        try:
+            payload = self.request_json("POST", "/v1/locks/acquire", headers=self.headers(), data=b"")
+        except http.UniSyncHTTPError as exc:
+            if exc.status == 409:
+                raise core.UniSyncError(
+                    "Unable to acquire sync lock: the lock is held by another client. "
+                    "Please check other devices or wait ~60 seconds for the lease to expire."
+                )
+            raise core.UniSyncError(
+                "Unable to acquire sync lock: {0}".format(str(exc))
+            )
         lease_token = payload.get("lease_token") if isinstance(payload, dict) else None
         if not lease_token:
             raise core.UniSyncError("lock acquisition response did not include lease_token")

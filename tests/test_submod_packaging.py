@@ -75,6 +75,21 @@ def test_settings_panel_exposes_manual_upload_button():
     assert "action Function(mas_unisync_manual_upload)" in header_source
 
 
+def test_runtime_sync_status_is_not_stored_in_persistent():
+    header_source = Path("game/Submods/MAS_UniSync/header.rpy").read_text(
+        encoding="utf-8"
+    )
+    hooks_source = Path("game/Submods/MAS_UniSync/hooks.rpy").read_text(
+        encoding="utf-8"
+    )
+
+    assert "default persistent._mas_unisync_status" not in header_source
+    assert "persistent._mas_unisync_status" not in header_source
+    assert "persistent._mas_unisync_status" not in hooks_source
+    assert "mas_unisync_status = {" in header_source
+    assert '"_mas_unisync_status"' in hooks_source
+
+
 def test_manual_upload_button_uses_direct_upload_flow():
     hooks_source = Path("game/Submods/MAS_UniSync/hooks.rpy").read_text(
         encoding="utf-8"

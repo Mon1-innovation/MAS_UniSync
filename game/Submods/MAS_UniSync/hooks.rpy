@@ -20,16 +20,16 @@ init -968 python:
         return mas_unisync_core.get_backup_dir(mas_unisync_savedir())
 
     def mas_unisync_versions():
-        renpy_version = getattr(renpy, "version", None)
-        if renpy_version is None:
+        renpy_version = None
+        try:
+            renpy_version = renpy.version(tuple=False)
+        except Exception:
             renpy_version = getattr(renpy, "version_string", "")
         mas_version = getattr(persistent, "version_number", "")
         return str(renpy_version or ""), str(mas_version or "")
 
     def mas_unisync_cleanup_for_renpy6():
-        # These fields are recreated by MAS/Ren'Py and can carry incompatible
-        # Ren'Py 8 revertable container references when loaded in Ren'Py 6.
-        for key in ("_voice_mute", "_mas_acs_pre_list", "_mas_windowreacts_notif_filters"):
+        for key in ("_voice_mute", "_mas_acs_pre_list", "_mas_windowreacts_notif_filters", "_mas_unisync_status"):
             try:
                 if key in persistent.__dict__:
                     del persistent.__dict__[key]
@@ -60,7 +60,8 @@ init -968 python:
                 try:
                     mas_unisync_session.heartbeat()
                 except Exception as exc:
-                    mas_unisync_session.status.mark_error(str(exc))
+                    mas_unisync_core.submod_log_debug(str(exc))
+                    mas_unisync_session.status.mark_error(exc)
                     mas_unisync_update_status(mas_unisync_session.status)
 
         mas_unisync_heartbeat_thread = threading.Thread(target=heartbeat_loop)
@@ -72,8 +73,8 @@ init -968 python:
         profile_key = mas_unisync_get_profile_key()
         if not profile_key:
             mas_unisync_update_status(message="")
-            persistent._mas_unisync_status["sync_status"] = "disabled"
-            persistent._mas_unisync_status["lock_state"] = "unlocked"
+            mas_unisync_status["sync_status"] = "disabled"
+            mas_unisync_status["lock_state"] = "unlocked"
             return None
         if mas_unisync_session is not None and not force:
             return mas_unisync_session
@@ -84,7 +85,8 @@ init -968 python:
             mas_unisync_start_heartbeat()
             return mas_unisync_session
         except Exception as exc:
-            mas_unisync_session.status.mark_error(str(exc))
+            mas_unisync_core.submod_log_debug(str(exc))
+            mas_unisync_session.status.mark_error(exc)
             mas_unisync_update_status(mas_unisync_session.status)
             if raise_on_failure:
                 raise
@@ -93,9 +95,13 @@ init -968 python:
     def mas_unisync_validate_persistent_for_upload(raise_on_failure=False):
         if mas_unisync_session is None or not mas_unisync_session.status.enabled:
             return False
-        ok, reason = mas_unisync_guard.validate_persistent_dict(persistent.__dict__)
+        validate = getattr(mas_unisync_guard, "validate_persistent_dict", None)
+        if validate is None:
+            return False
+        ok, reason = validate(persistent.__dict__)
         if not ok:
             message = "MAS UniSync blocked upload: " + reason
+            mas_unisync_core.submod_log_debug(message)
             mas_unisync_session.status.mark_error(message)
             mas_unisync_update_status(mas_unisync_session.status)
             if raise_on_failure:
@@ -114,7 +120,8 @@ init -968 python:
             mas_unisync_update_status(mas_unisync_session.status)
             return result
         except Exception as exc:
-            mas_unisync_session.status.mark_error(str(exc))
+            mas_unisync_core.submod_log_debug(str(exc))
+            mas_unisync_session.status.mark_error(exc)
             mas_unisync_update_status(mas_unisync_session.status)
             if raise_on_failure:
                 raise
@@ -134,7 +141,8 @@ init -968 python:
                 mas_unisync_session.upload_if_changed()
                 mas_unisync_update_status(mas_unisync_session.status)
             except Exception as exc:
-                mas_unisync_session.status.mark_error(str(exc))
+                mas_unisync_core.submod_log_debug(str(exc))
+                mas_unisync_session.status.mark_error(exc)
                 mas_unisync_update_status(mas_unisync_session.status)
 
         mas_unisync_upload_thread = threading.Thread(target=upload_worker)
@@ -171,7 +179,6 @@ init -968 python:
                 mas_unisync_update_status(message="MAS UniSync profile key is not configured")
                 renpy.notify(_("MAS UniSync profile key is not configured"))
                 return
-            # Release any stale lease before acquiring a fresh one
             if mas_unisync_session is not None and mas_unisync_session.status.lease_token:
                 try:
                     mas_unisync_session.release()
@@ -202,6 +209,8 @@ init -968 python:
 
     mas_unisync_cleanup_for_renpy6()
     mas_unisync_install_save_hook()
+    # If startup sync fails for any reason (lock unavailable, network error, etc.),
+    # propagate the exception to block game load entirely.
     mas_unisync_startup_sync()
 
 init python:

@@ -16,7 +16,7 @@ except NameError:
 PRIMITIVE_TYPES = (type(None), str, unicode, bool, int, long, float)
 DATE_TYPES = (datetime.date, datetime.timedelta)
 TIME_TYPES = (datetime.datetime, datetime.time)
-OPAQUE_TYPE_NAMES = ("Preferences", "Persistent")
+OPAQUE_TYPE_NAMES = ("Preferences", "Persistent", "MASAudioData")
 
 
 def _type_name(value):
