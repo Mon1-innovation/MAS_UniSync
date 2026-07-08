@@ -1,6 +1,7 @@
 import {Box, Button, Text} from '@primer/react'
 import {CheckIcon} from '@primer/octicons-react'
 import {useEffect, useState} from 'react'
+import {useTranslation} from 'react-i18next'
 import {getAdminSettings, updateAdminSettings} from '../../api/adminApi'
 import type {SystemSettings} from '../../api/types'
 import {ErrorBanner} from '../../components/ErrorBanner'
@@ -14,6 +15,7 @@ const emptySettings: SystemSettings = {
 }
 
 export function AdminSettingsPage() {
+  const {t} = useTranslation()
   const [settings, setSettings] = useState<SystemSettings>(emptySettings)
   const [isLoading, setIsLoading] = useState(true)
   const [isSaving, setIsSaving] = useState(false)
@@ -30,7 +32,7 @@ export function AdminSettingsPage() {
       })
       .catch(() => {
         if (!cancelled) {
-          setError('Could not load system settings.')
+          setError(t('admin.settings.loadError'))
         }
       })
       .finally(() => {
@@ -41,7 +43,7 @@ export function AdminSettingsPage() {
     return () => {
       cancelled = true
     }
-  }, [])
+  }, [t])
 
   async function handleSubmit(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault()
@@ -51,9 +53,9 @@ export function AdminSettingsPage() {
     try {
       const response = await updateAdminSettings(settings)
       setSettings(response.settings)
-      setSavedMessage('Settings saved.')
+      setSavedMessage(t('admin.settings.saved'))
     } catch {
-      setError('Could not save system settings.')
+      setError(t('admin.settings.saveError'))
     } finally {
       setIsSaving(false)
     }
@@ -67,8 +69,8 @@ export function AdminSettingsPage() {
     <Box className="page-stack">
       <Box className="page-heading">
         <Box>
-          <Text as="h1">Settings</Text>
-          <Text as="p">Configure runtime URLs and account limits.</Text>
+          <Text as="h1">{t('admin.settings.title')}</Text>
+          <Text as="p">{t('admin.settings.description')}</Text>
         </Box>
       </Box>
 
@@ -85,7 +87,7 @@ export function AdminSettingsPage() {
         <form onSubmit={handleSubmit}>
           <Box className="panel settings-form">
             <label className="field">
-              <span>Backend API URL</span>
+              <span>{t('admin.settings.backendApiUrl')}</span>
               <input
                 value={settings.backend_api_url}
                 onChange={(event) => updateField('backend_api_url', event.target.value)}
@@ -93,7 +95,7 @@ export function AdminSettingsPage() {
               />
             </label>
             <label className="field">
-              <span>Frontend web URL</span>
+              <span>{t('admin.settings.frontendWebUrl')}</span>
               <input
                 value={settings.frontend_web_url}
                 onChange={(event) => updateField('frontend_web_url', event.target.value)}
@@ -101,7 +103,7 @@ export function AdminSettingsPage() {
               />
             </label>
             <label className="field">
-              <span>Profile storage limit bytes</span>
+              <span>{t('admin.settings.profileStorageLimitBytes')}</span>
               <input
                 type="number"
                 min={1}
@@ -111,7 +113,7 @@ export function AdminSettingsPage() {
               />
             </label>
             <label className="field">
-              <span>Max active profiles per account</span>
+              <span>{t('admin.settings.maxActiveProfiles')}</span>
               <input
                 type="number"
                 min={1}
@@ -122,7 +124,7 @@ export function AdminSettingsPage() {
             </label>
             <Box>
               <Button type="submit" variant="primary" disabled={isSaving}>
-                Save settings
+                {t('admin.settings.save')}
               </Button>
             </Box>
           </Box>

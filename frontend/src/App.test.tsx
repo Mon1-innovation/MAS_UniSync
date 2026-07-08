@@ -298,7 +298,7 @@ describe('App', () => {
       </MemoryRouter>,
     )
 
-    await expect(screen.findByText(/does not have access to the admin area/i)).resolves.toBeInTheDocument()
+    await expect(screen.findByText(/(does not have access to the admin area|没有权限访问管理区域)/i)).resolves.toBeInTheDocument()
     expect(screen.queryByRole('link', {name: /^admin$/i})).not.toBeInTheDocument()
   })
 
@@ -366,7 +366,7 @@ describe('App', () => {
     )
 
     await expect(screen.findAllByText('Player')).resolves.not.toHaveLength(0)
-    expect(screen.getByText('No profiles')).toBeInTheDocument()
+    expect(screen.getByText(/(No profiles|没有 Profile)/i)).toBeInTheDocument()
   })
 
   it('updates a refreshed profile key and removes deleted rows', async () => {
@@ -547,8 +547,8 @@ describe('App', () => {
     )
 
     await expect(screen.findByRole('heading', {level: 1, name: 'Main'})).resolves.toBeInTheDocument()
-    await userEvent.click(screen.getByRole('button', {name: /delete key/i}))
-    await userEvent.click(await screen.findByRole('button', {name: /^delete this key$/i}))
+    await userEvent.click(screen.getByRole('button', {name: /(delete key|删除 Key)/i}))
+    await userEvent.click(await screen.findByRole('button', {name: /^(delete this key|删除这个 Key)$/i}))
 
     await expect(screen.findAllByText('Player')).resolves.not.toHaveLength(0)
     expectFetchCalled('/admin/profile-keys/9', {method: 'DELETE'})
@@ -591,11 +591,11 @@ describe('App', () => {
       </MemoryRouter>,
     )
 
-    await userEvent.click(await screen.findByRole('button', {name: /delete key/i}))
-    const confirmButton = await screen.findByRole('button', {name: /^delete this key$/i})
+    await userEvent.click(await screen.findByRole('button', {name: /(delete key|删除 Key)/i}))
+    const confirmButton = await screen.findByRole('button', {name: /^(delete this key|删除这个 Key)$/i})
     await userEvent.click(confirmButton)
 
-    await expect(screen.findByText(/could not delete this profile key/i)).resolves.toBeInTheDocument()
+    await expect(screen.findByText(/(could not delete this profile key|无法删除这个 Profile Key)/i)).resolves.toBeInTheDocument()
     expect(confirmButton).toBeEnabled()
     expect(screen.getByRole('heading', {level: 1, name: 'Main'})).toBeInTheDocument()
   })
@@ -641,10 +641,10 @@ describe('App', () => {
     )
 
     await expect(screen.findByRole('heading', {level: 1, name: 'Old key'})).resolves.toBeInTheDocument()
-    const deleteButton = screen.getByRole('button', {name: /delete key/i})
+    const deleteButton = screen.getByRole('button', {name: /(delete key|删除 Key)/i})
     expect(deleteButton).toBeEnabled()
     await userEvent.click(deleteButton)
-    await userEvent.click(await screen.findByRole('button', {name: /^delete this key$/i}))
+    await userEvent.click(await screen.findByRole('button', {name: /^(delete this key|删除这个 Key)$/i}))
 
     await expect(screen.findAllByText('Player')).resolves.not.toHaveLength(0)
     expectFetchCalled('/admin/profile-keys/9', {method: 'DELETE'})
@@ -737,8 +737,8 @@ describe('App', () => {
     await expect(screen.findByRole('heading', {level: 1, name: 'Main'})).resolves.toBeInTheDocument()
     expect(screen.getByText(/(Profile file size|Profile 文件大小)/i)).toBeInTheDocument()
     expect(screen.getByRole('progressbar', {name: /存储用量/i})).toHaveAttribute('aria-valuenow', '50')
-    expect(screen.getByText('Current persistent')).toBeInTheDocument()
-    expect(screen.getByText(/version #22/i)).toBeInTheDocument()
+    expect(screen.getByText(/(Current persistent|当前 persistent)/i)).toBeInTheDocument()
+    expect(screen.getByText(/(version #22|版本 #22)/i)).toBeInTheDocument()
     expect(screen.getAllByText('12 B').length).toBeGreaterThanOrEqual(1)
     expect(screen.getByText('sha-current')).toBeInTheDocument()
     expect(await screen.findByText('2026-07-07')).toBeInTheDocument()
@@ -747,7 +747,7 @@ describe('App', () => {
 
     await userEvent.click(screen.getByRole('button', {name: /(download current|下载当前文件)/i}))
     await userEvent.click(screen.getByRole('button', {name: /(download backup 2026-07-07|下载 2026-07-07 的备份)/i}))
-    await userEvent.click(screen.getByRole('button', {name: /restore backup 2026-07-07/i}))
+    await userEvent.click(screen.getByRole('button', {name: /(restore backup 2026-07-07|恢复 2026-07-07 的备份)/i}))
 
     expectFetchCalled('/admin/profiles/9/persistent/current')
     expectFetchCalled('/admin/profiles/9/persistent/current/download')
@@ -792,10 +792,10 @@ describe('App', () => {
     )
 
     await expect(screen.findByRole('heading', {level: 1, name: 'Main'})).resolves.toBeInTheDocument()
-    expect(screen.getByText('No current persistent')).toBeInTheDocument()
-    expect(screen.getByText('This profile does not have an uploaded persistent file yet.')).toBeInTheDocument()
-    expect(screen.queryByText(/could not load this profile/i)).not.toBeInTheDocument()
-    expect(screen.queryByRole('button', {name: /download current/i})).not.toBeInTheDocument()
+    expect(screen.getByText(/(No current persistent|没有当前 persistent)/i)).toBeInTheDocument()
+    expect(screen.getByText(/(does not have an uploaded persistent file yet|还没有上传 persistent 文件)/i)).toBeInTheDocument()
+    expect(screen.queryByText(/(could not load this profile|无法加载这个 Profile)/i)).not.toBeInTheDocument()
+    expect(screen.queryByRole('button', {name: /(download current|下载当前文件)/i})).not.toBeInTheDocument()
   })
 
   it('links profile keys to owned persistent files and downloads them', async () => {
@@ -1043,16 +1043,16 @@ describe('App', () => {
       </MemoryRouter>,
     )
 
-    await expect(screen.findByRole('heading', {level: 1, name: /settings/i})).resolves.toBeInTheDocument()
+    await expect(screen.findByRole('heading', {level: 1, name: /(settings|设置)/i})).resolves.toBeInTheDocument()
     await userEvent.clear(screen.getByLabelText(/backend api url/i))
     await userEvent.type(screen.getByLabelText(/backend api url/i), 'https://api2.example.test')
-    await userEvent.clear(screen.getByLabelText(/profile storage limit/i))
-    await userEvent.type(screen.getByLabelText(/profile storage limit/i), '20971520')
-    await userEvent.clear(screen.getByLabelText(/max active profiles/i))
-    await userEvent.type(screen.getByLabelText(/max active profiles/i), '4')
-    await userEvent.click(screen.getByRole('button', {name: /save settings/i}))
+    await userEvent.clear(screen.getByLabelText(/(profile storage limit|Profile 存储上限)/i))
+    await userEvent.type(screen.getByLabelText(/(profile storage limit|Profile 存储上限)/i), '20971520')
+    await userEvent.clear(screen.getByLabelText(/(max active profiles|最大启用 Profile 数)/i))
+    await userEvent.type(screen.getByLabelText(/(max active profiles|最大启用 Profile 数)/i), '4')
+    await userEvent.click(screen.getByRole('button', {name: /(save settings|保存设置)/i}))
 
-    await expect(screen.findByText(/settings saved/i)).resolves.toBeInTheDocument()
+    await expect(screen.findByText(/(settings saved|设置已保存)/i)).resolves.toBeInTheDocument()
     expect(submittedBody).toEqual({
       backend_api_url: 'https://api2.example.test',
       frontend_web_url: 'https://portal.example.test',

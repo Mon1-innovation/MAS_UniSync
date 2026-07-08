@@ -1,6 +1,7 @@
 import {Box, Text} from '@primer/react'
 import {SearchIcon} from '@primer/octicons-react'
 import {useEffect, useMemo, useState} from 'react'
+import {useTranslation} from 'react-i18next'
 import {Link} from 'react-router-dom'
 import {listAuditLogs} from '../../api/adminApi'
 import type {AuditLog} from '../../api/types'
@@ -11,6 +12,7 @@ import {RelativeTime} from '../../components/RelativeTime'
 import {StatusLabel} from '../../components/StatusLabel'
 
 export function AdminAuditLogsPage() {
+  const {t} = useTranslation()
   const [logs, setLogs] = useState<AuditLog[]>([])
   const [query, setQuery] = useState('')
   const [isLoading, setIsLoading] = useState(true)
@@ -26,7 +28,7 @@ export function AdminAuditLogsPage() {
       })
       .catch(() => {
         if (!cancelled) {
-          setError('Could not load audit logs.')
+          setError(t('admin.auditLogs.loadError'))
         }
       })
       .finally(() => {
@@ -37,7 +39,7 @@ export function AdminAuditLogsPage() {
     return () => {
       cancelled = true
     }
-  }, [])
+  }, [t])
 
   const filteredLogs = useMemo(() => {
     const needle = query.trim().toLowerCase()
@@ -54,28 +56,35 @@ export function AdminAuditLogsPage() {
     <Box className="page-stack">
       <Box className="page-heading">
         <Box>
-          <Text as="h1">Audit logs</Text>
-          <Text as="p">Recent administrative and profile-key activity.</Text>
+          <Text as="h1">{t('admin.auditLogs.title')}</Text>
+          <Text as="p">{t('admin.auditLogs.description')}</Text>
         </Box>
         <Box className="search-box">
           <SearchIcon size={16} aria-hidden="true" />
-          <input className="search-input" value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Filter action or target" />
+          <input
+            className="search-input"
+            value={query}
+            onChange={(event) => setQuery(event.target.value)}
+            placeholder={t('admin.auditLogs.filterPlaceholder')}
+          />
         </Box>
       </Box>
       {error ? <ErrorBanner message={error} /> : null}
       {isLoading ? <LoadingState /> : null}
-      {!isLoading && filteredLogs.length === 0 ? <EmptyState title="No audit logs" message="No log entries match the current filter." /> : null}
+      {!isLoading && filteredLogs.length === 0 ? (
+        <EmptyState title={t('admin.auditLogs.emptyTitle')} message={t('admin.auditLogs.emptyMessage')} />
+      ) : null}
       {filteredLogs.length > 0 ? (
         <Box className="table-panel">
           <table>
             <thead>
               <tr>
-                <th>Action</th>
-                <th>Actor</th>
-                <th>Targets</th>
-                <th>IP</th>
-                <th>User agent</th>
-                <th>Created</th>
+                <th>{t('admin.auditLogs.action')}</th>
+                <th>{t('admin.auditLogs.actor')}</th>
+                <th>{t('admin.auditLogs.targets')}</th>
+                <th>{t('admin.auditLogs.ip')}</th>
+                <th>{t('admin.auditLogs.userAgent')}</th>
+                <th>{t('admin.auditLogs.created')}</th>
               </tr>
             </thead>
             <tbody>
@@ -85,13 +94,13 @@ export function AdminAuditLogsPage() {
                     <Text sx={{fontFamily: 'mono'}}>{log.action}</Text>
                   </td>
                   <td>
-                    #{log.actor_user_id || 'system'} <StatusLabel status={log.actor_role} />
+                    {log.actor_user_id ? `#${log.actor_user_id}` : t('admin.auditLogs.system')} <StatusLabel status={log.actor_role} />
                   </td>
                   <td>
                     <TargetLinks log={log} />
                   </td>
-                  <td>{log.ip_address || 'Unknown'}</td>
-                  <td className="truncate">{log.user_agent || 'Unknown'}</td>
+                  <td>{log.ip_address || t('admin.auditLogs.unknown')}</td>
+                  <td className="truncate">{log.user_agent || t('admin.auditLogs.unknown')}</td>
                   <td>
                     <RelativeTime value={log.created_at} />
                   </td>
@@ -106,12 +115,15 @@ export function AdminAuditLogsPage() {
 }
 
 function TargetLinks({log}: {log: AuditLog}) {
+  const {t} = useTranslation()
   return (
     <Box sx={{display: 'flex', gap: 2, flexWrap: 'wrap'}}>
-      {log.target_user_id ? <span>User #{log.target_user_id}</span> : null}
+      {log.target_user_id ? <span>{t('admin.auditLogs.userTarget', {id: log.target_user_id})}</span> : null}
       {log.target_profile_id ? <Link to={`/admin/profiles/${log.target_profile_id}`}>#{log.target_profile_id}</Link> : null}
-      {log.target_profile_key_id ? <span>Key #{log.target_profile_key_id}</span> : null}
-      {!log.target_user_id && !log.target_profile_id && !log.target_profile_key_id ? <span className="muted">None</span> : null}
+      {log.target_profile_key_id ? <span>{t('admin.auditLogs.keyTarget', {id: log.target_profile_key_id})}</span> : null}
+      {!log.target_user_id && !log.target_profile_id && !log.target_profile_key_id ? (
+        <span className="muted">{t('admin.auditLogs.none')}</span>
+      ) : null}
     </Box>
   )
 }

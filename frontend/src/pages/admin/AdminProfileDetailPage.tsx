@@ -2,6 +2,8 @@ import {Box, Button, Text} from '@primer/react'
 import {BlockedIcon, DownloadIcon, ShieldCheckIcon, SyncIcon, TrashIcon, UnlockIcon, VersionsIcon} from '@primer/octicons-react'
 import {useEffect, useState} from 'react'
 import type {ReactNode} from 'react'
+import type {TFunction} from 'i18next'
+import {useTranslation} from 'react-i18next'
 import {useNavigate, useParams} from 'react-router-dom'
 import {ApiError} from '../../api/client'
 import {
@@ -33,6 +35,7 @@ import {StatusLabel} from '../../components/StatusLabel'
 type PendingAction = 'banProfile' | 'unbanProfile' | 'banKey' | 'unbanKey' | 'refreshKey' | 'deleteKey' | 'releaseLock' | null
 
 export function AdminProfileDetailPage() {
+  const {t} = useTranslation()
   const {profileId} = useParams()
   const navigate = useNavigate()
   const numericProfileId = Number(profileId)
@@ -47,7 +50,7 @@ export function AdminProfileDetailPage() {
   useEffect(() => {
     let cancelled = false
     if (!Number.isFinite(numericProfileId)) {
-      setError('Invalid profile id.')
+      setError(t('admin.profileDetail.invalidProfileId'))
       return
     }
     Promise.all([
@@ -64,13 +67,13 @@ export function AdminProfileDetailPage() {
       })
       .catch(() => {
         if (!cancelled) {
-          setError('Could not load this profile.')
+          setError(t('admin.profileDetail.loadError'))
         }
       })
     return () => {
       cancelled = true
     }
-  }, [numericProfileId])
+  }, [numericProfileId, t])
 
   async function handleConfirm() {
     if (!profile || !pendingAction) {
@@ -92,7 +95,7 @@ export function AdminProfileDetailPage() {
       }
       setPendingAction(null)
     } catch {
-      setError(actionType === 'deleteKey' ? 'Could not delete this profile key.' : 'Could not complete this admin action.')
+      setError(actionType === 'deleteKey' ? t('admin.profileDetail.deleteError') : t('admin.profileDetail.actionError'))
     } finally {
       setIsBusy(false)
     }
@@ -125,7 +128,7 @@ export function AdminProfileDetailPage() {
     try {
       await restoreAdminBackup(profile.id, backup.id)
     } catch {
-      setError('Could not restore this backup.')
+      setError(t('admin.profileDetail.restoreError'))
     } finally {
       setIsBusy(false)
     }
@@ -139,22 +142,25 @@ export function AdminProfileDetailPage() {
         <>
           <Box className="page-heading">
             <Box>
-              <Text as="h1">{profile.display_name || `Profile #${profile.id}`}</Text>
-              <Text as="p">User #{profile.user_id} · Created <RelativeTime value={profile.created_at} /></Text>
+              <Text as="h1">{profile.display_name || t('admin.profileDetail.profileTitle', {id: profile.id})}</Text>
+              <Text as="p">
+                {t('admin.profileDetail.userCreated', {id: profile.user_id})} <RelativeTime value={profile.created_at} />
+              </Text>
             </Box>
             <StatusLabel status={profile.revoked_at ? 'revoked' : 'active'} />
           </Box>
           <Box className="panel">
             <Text as="h2" sx={{fontSize: 2, mt: 0}}>
-              Profile key
+              {t('admin.profileDetail.profileKey')}
             </Text>
             <CopyableSecret value={profile.profile_key} />
             <Box className="meta-line">
-              Last used <RelativeTime value={profile.last_used_at} /> · Last upload <RelativeTime value={profile.last_upload_at} />
+              {t('admin.profileDetail.lastUsed')} <RelativeTime value={profile.last_used_at} /> · {t('admin.profileDetail.lastUpload')}{' '}
+              <RelativeTime value={profile.last_upload_at} />
             </Box>
             <Box className="info-grid" sx={{mt: 3}}>
               <Box className="info-cell">
-                <span>Profile file size</span>
+                <span>{t('admin.profileDetail.profileFileSize')}</span>
                 <strong>
                   <ByteSize value={profile.storage_usage} />
                 </strong>
@@ -166,79 +172,79 @@ export function AdminProfileDetailPage() {
             <Box className="section-heading">
               <Box>
                 <Text as="h2" sx={{fontSize: 2, mt: 0, mb: 1}}>
-                  Current persistent
+                  {t('admin.profileDetail.currentPersistent')}
                 </Text>
                 {current ? (
                   <Text as="p" sx={{color: 'fg.muted', m: 0}}>
-                    Version #{current.id} · Uploaded <RelativeTime value={current.created_at} />
+                    {t('admin.profileDetail.versionUploaded', {id: current.id})} <RelativeTime value={current.created_at} />
                   </Text>
                 ) : null}
               </Box>
               {current ? (
                 <Button type="button" leadingVisual={DownloadIcon} onClick={handleDownloadCurrent} disabled={downloadingId === 'current'}>
-                  Download current
+                  {t('admin.profileDetail.downloadCurrent')}
                 </Button>
               ) : null}
             </Box>
             {current ? (
               <Box className="info-grid">
-                <Info label="Size" value={<ByteSize value={current.size} />} />
+                <Info label={t('admin.profileDetail.size')} value={<ByteSize value={current.size} />} />
                 <Info label="SHA-256" value={<code className="truncate">{current.sha256}</code>} />
-                <Info label="Ren'Py" value={current.renpy_version || 'Unknown'} />
-                <Info label="MAS" value={current.mas_version || 'Unknown'} />
+                <Info label="Ren'Py" value={current.renpy_version || t('admin.profileDetail.unknown')} />
+                <Info label="MAS" value={current.mas_version || t('admin.profileDetail.unknown')} />
               </Box>
             ) : (
               <Box className="empty-inline">
-                <Text as="strong">No current persistent</Text>
-                <Text as="p">This profile does not have an uploaded persistent file yet.</Text>
+                <Text as="strong">{t('admin.profileDetail.noCurrentTitle')}</Text>
+                <Text as="p">{t('admin.profileDetail.noCurrentMessage')}</Text>
               </Box>
             )}
           </Box>
           <Box className="action-grid">
             <Button type="button" variant="danger" leadingVisual={BlockedIcon} onClick={() => setPendingAction('banProfile')}>
-              Ban profile
+              {t('admin.profileDetail.banProfile')}
             </Button>
             <Button type="button" leadingVisual={ShieldCheckIcon} onClick={() => setPendingAction('unbanProfile')}>
-              Unban profile
+              {t('admin.profileDetail.unbanProfile')}
             </Button>
             <Button type="button" variant="danger" leadingVisual={BlockedIcon} onClick={() => setPendingAction('banKey')}>
-              Ban key
+              {t('admin.profileDetail.banKey')}
             </Button>
             <Button type="button" leadingVisual={ShieldCheckIcon} onClick={() => setPendingAction('unbanKey')}>
-              Unban key
+              {t('admin.profileDetail.unbanKey')}
             </Button>
             <Button type="button" leadingVisual={SyncIcon} onClick={() => setPendingAction('refreshKey')} disabled={Boolean(profile.revoked_at)}>
-              Refresh key
+              {t('admin.profileDetail.refreshKey')}
             </Button>
             <Button type="button" variant="danger" leadingVisual={TrashIcon} onClick={() => setPendingAction('deleteKey')}>
-              Delete key
+              {t('admin.profileDetail.deleteKey')}
             </Button>
             <Button type="button" leadingVisual={UnlockIcon} onClick={() => setPendingAction('releaseLock')}>
-              Force-release lock
+              {t('admin.profileDetail.releaseLock')}
             </Button>
           </Box>
           <Box className="table-panel">
             <Box className="table-heading">
               <Box>
                 <Text as="h2" sx={{fontSize: 2, mt: 0, mb: 1}}>
-                  Daily backups
+                  {t('admin.profileDetail.dailyBackups')}
                 </Text>
                 <Text as="p" sx={{color: 'fg.muted', m: 0}}>
-                  {backups.length} retained backup{backups.length === 1 ? '' : 's'}
+                  {t('admin.profileDetail.retainedBackups', {count: backups.length})}
                 </Text>
               </Box>
             </Box>
             {backups.length === 0 ? (
-              <EmptyState title="No backups" message="Backups appear after successful daily uploads." />
+              <EmptyState title={t('admin.profileDetail.noBackupsTitle')} message={t('admin.profileDetail.noBackupsMessage')} />
             ) : (
               <table>
                 <thead>
                   <tr>
-                    <th>Date</th>
-                    <th>Size</th>
+                    <th>{t('admin.profileDetail.date')}</th>
+                    <th>{t('admin.profileDetail.size')}</th>
                     <th>SHA-256</th>
-                    <th>Created</th>
-                    <th>Actions</th>
+                    <th>{t('admin.profileDetail.createdColumn')}</th>
+                    <th>{t('admin.profileDetail.actions')}</th>
                   </tr>
                 </thead>
                 <tbody>
@@ -262,21 +268,21 @@ export function AdminProfileDetailPage() {
                             type="button"
                             size="small"
                             leadingVisual={DownloadIcon}
-                            aria-label={`Download backup ${backup.backup_date}`}
+                            aria-label={t('admin.profileDetail.downloadBackup', {date: backup.backup_date})}
                             onClick={() => handleDownloadBackup(backup)}
                             disabled={downloadingId === backup.id}
                           >
-                            Download
+                            {t('admin.profileDetail.download')}
                           </Button>
                           <Button
                             type="button"
                             size="small"
                             variant="danger"
-                            aria-label={`Restore backup ${backup.backup_date}`}
+                            aria-label={t('admin.profileDetail.restoreBackup', {date: backup.backup_date})}
                             onClick={() => handleRestoreBackup(backup)}
                             disabled={isBusy}
                           >
-                            Restore
+                            {t('admin.profileDetail.restore')}
                           </Button>
                         </Box>
                       </td>
@@ -290,13 +296,9 @@ export function AdminProfileDetailPage() {
       ) : null}
       {pendingAction ? (
         <ConfirmDialog
-          title={actionTitle(pendingAction)}
-          message={
-            pendingAction === 'deleteKey'
-              ? 'This profile key and its stored persistent files will be deleted. The admin action will be recorded in audit logs.'
-              : 'This admin action is applied immediately and will be recorded in audit logs.'
-          }
-          confirmText={actionConfirmText(pendingAction)}
+          title={actionTitle(pendingAction, t)}
+          message={pendingAction === 'deleteKey' ? t('admin.profileDetail.deleteMessage') : t('admin.profileDetail.actionMessage')}
+          confirmText={actionConfirmText(pendingAction, t)}
           variant={pendingAction.includes('ban') || pendingAction.includes('delete') ? 'danger' : 'primary'}
           onConfirm={handleConfirm}
           onCancel={() => setPendingAction(null)}
@@ -327,21 +329,12 @@ function Info({label, value}: {label: string; value: ReactNode}) {
   )
 }
 
-function actionTitle(action: PendingAction) {
-  const labels: Record<Exclude<PendingAction, null>, string> = {
-    banProfile: 'Ban this profile?',
-    unbanProfile: 'Unban this profile?',
-    banKey: 'Ban this key?',
-    unbanKey: 'Unban this key?',
-    refreshKey: 'Refresh this key?',
-    deleteKey: 'Delete this key?',
-    releaseLock: 'Force-release lock?',
-  }
-  return action ? labels[action] : ''
+function actionTitle(action: PendingAction, t: TFunction) {
+  return action ? t(`admin.profileDetail.actionTitles.${action}`) : ''
 }
 
-function actionConfirmText(action: PendingAction) {
-  return actionTitle(action).replace('?', '')
+function actionConfirmText(action: PendingAction, t: TFunction) {
+  return action ? t(`admin.profileDetail.actionConfirm.${action}`) : ''
 }
 
 function saveBlob(blob: Blob, filename: string) {

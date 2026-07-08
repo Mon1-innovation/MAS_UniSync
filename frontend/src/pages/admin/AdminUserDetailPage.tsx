@@ -1,6 +1,7 @@
 import {Box, Button, Text} from '@primer/react'
 import {BlockedIcon, ShieldCheckIcon} from '@primer/octicons-react'
 import {useEffect, useState} from 'react'
+import {useTranslation} from 'react-i18next'
 import {Link, useNavigate, useParams} from 'react-router-dom'
 import {banUser, getAdminUser, unbanUser} from '../../api/adminApi'
 import type {Profile, User} from '../../api/types'
@@ -15,6 +16,7 @@ import {StatusLabel} from '../../components/StatusLabel'
 type PendingAction = 'ban' | 'unban' | null
 
 export function AdminUserDetailPage() {
+  const {t} = useTranslation()
   const {userId} = useParams()
   const numericUserId = Number(userId)
   const [user, setUser] = useState<User | null>(null)
@@ -27,7 +29,7 @@ export function AdminUserDetailPage() {
 
   useEffect(() => {
     if (!Number.isFinite(numericUserId)) {
-      setError('Invalid user id.')
+      setError(t('admin.userDetail.invalidUserId'))
       return
     }
     getAdminUser(numericUserId)
@@ -35,8 +37,8 @@ export function AdminUserDetailPage() {
         setUser(response.user)
         setProfiles(response.profiles ?? [])
       })
-      .catch(() => setError('Could not load this user.'))
-  }, [numericUserId])
+      .catch(() => setError(t('admin.userDetail.loadError')))
+  }, [numericUserId, t])
 
   async function handleConfirm() {
     if (!pendingAction || !user) {
@@ -65,32 +67,32 @@ export function AdminUserDetailPage() {
             <AvatarName user={user} subtitle={`Flarum #${user.flarum_user_id}`} />
             <Box sx={{display: 'flex', gap: 2}}>
               <Button type="button" variant="danger" leadingVisual={BlockedIcon} onClick={() => setPendingAction('ban')}>
-                Ban user
+                {t('admin.userDetail.banUser')}
               </Button>
               <Button type="button" leadingVisual={ShieldCheckIcon} onClick={() => setPendingAction('unban')}>
-                Unban user
+                {t('admin.userDetail.unbanUser')}
               </Button>
             </Box>
           </Box>
           <Box className="info-grid">
-            <Info label="User ID" value={`#${user.id}`} />
-            <Info label="Username" value={user.username} />
-            <Info label="Display name" value={user.display_name || 'Unset'} />
-            <Info label="Role" value={<StatusLabel status={user.role} />} />
-            <Info label="Last login" value={<RelativeTime value={user.last_login_at} />} />
+            <Info label={t('admin.userDetail.userId')} value={`#${user.id}`} />
+            <Info label={t('admin.userDetail.username')} value={user.username} />
+            <Info label={t('admin.userDetail.displayName')} value={user.display_name || t('admin.userDetail.unset')} />
+            <Info label={t('admin.userDetail.role')} value={<StatusLabel status={user.role} />} />
+            <Info label={t('admin.userDetail.lastLogin')} value={<RelativeTime value={user.last_login_at} />} />
           </Box>
           <Box className="table-panel">
             {profiles.length === 0 ? (
-              <EmptyState title="No profiles" message="This user has not created any profiles." />
+              <EmptyState title={t('admin.userDetail.noProfilesTitle')} message={t('admin.userDetail.noProfilesMessage')} />
             ) : (
               <table>
                 <thead>
                   <tr>
-                    <th>Profile</th>
-                    <th>Status</th>
-                    <th>Created</th>
-                    <th>Last used</th>
-                    <th>Last upload</th>
+                    <th>{t('admin.userDetail.profile')}</th>
+                    <th>{t('admin.userDetail.status')}</th>
+                    <th>{t('admin.userDetail.created')}</th>
+                    <th>{t('admin.userDetail.lastUsed')}</th>
+                    <th>{t('admin.userDetail.lastUpload')}</th>
                   </tr>
                 </thead>
                 <tbody>
@@ -98,7 +100,7 @@ export function AdminUserDetailPage() {
                     <tr key={profile.id} className="clickable-row" onClick={() => navigate(`/admin/profiles/${profile.id}`)}>
                       <td>
                         <Link to={`/admin/profiles/${profile.id}`} onClick={(event) => event.stopPropagation()}>
-                          {profile.display_name || `Profile #${profile.id}`}
+                          {profile.display_name || t('admin.userDetail.profileTitle', {id: profile.id})}
                         </Link>
                         <Text as="div" sx={{color: 'fg.muted', fontSize: 0}}>
                           #{profile.id}
@@ -124,7 +126,7 @@ export function AdminUserDetailPage() {
           </Box>
           <Box className="panel">
             <Text as="h2" sx={{fontSize: 2, mt: 0}}>
-              Open profile by ID
+              {t('admin.userDetail.openProfileById')}
             </Text>
             <form
               className="inline-form"
@@ -136,19 +138,19 @@ export function AdminUserDetailPage() {
               }}
             >
               <label className="field inline-field">
-                <span>Profile ID</span>
+                <span>{t('admin.userDetail.profileId')}</span>
                 <input value={profileId} onChange={(event) => setProfileId(event.target.value)} inputMode="numeric" />
               </label>
-              <Button type="submit">Open profile</Button>
+              <Button type="submit">{t('admin.userDetail.openProfile')}</Button>
             </form>
           </Box>
         </>
       ) : null}
       {pendingAction ? (
         <ConfirmDialog
-          title={pendingAction === 'ban' ? 'Ban this user?' : 'Unban this user?'}
-          message={pendingAction === 'ban' ? 'All profile keys under this user will be denied.' : 'This removes active user-level bans.'}
-          confirmText={pendingAction === 'ban' ? 'Ban user' : 'Unban user'}
+          title={pendingAction === 'ban' ? t('admin.userDetail.banTitle') : t('admin.userDetail.unbanTitle')}
+          message={pendingAction === 'ban' ? t('admin.userDetail.banMessage') : t('admin.userDetail.unbanMessage')}
+          confirmText={pendingAction === 'ban' ? t('admin.userDetail.banUser') : t('admin.userDetail.unbanUser')}
           variant={pendingAction === 'ban' ? 'danger' : 'primary'}
           onConfirm={handleConfirm}
           onCancel={() => setPendingAction(null)}

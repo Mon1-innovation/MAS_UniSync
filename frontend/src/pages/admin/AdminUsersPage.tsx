@@ -1,6 +1,7 @@
 import {Box, Button, Text} from '@primer/react'
 import {SearchIcon} from '@primer/octicons-react'
 import {useEffect, useMemo, useState} from 'react'
+import {useTranslation} from 'react-i18next'
 import {useNavigate} from 'react-router-dom'
 import {ApiError} from '../../api/client'
 import {listAdminUsers} from '../../api/adminApi'
@@ -15,6 +16,7 @@ import {RelativeTime} from '../../components/RelativeTime'
 import {StatusLabel} from '../../components/StatusLabel'
 
 export function AdminUsersPage() {
+  const {t} = useTranslation()
   const [users, setUsers] = useState<AdminUserListItem[]>([])
   const [query, setQuery] = useState('')
   const [isLoading, setIsLoading] = useState(true)
@@ -38,9 +40,9 @@ export function AdminUsersPage() {
           if (user) {
             setUser({...user, role: 'user'})
           }
-          setError('Your session is not authorized for the admin API.')
+          setError(t('admin.users.accessDeniedMessage'))
         } else {
-          setError('Could not load admin users.')
+          setError(t('admin.users.loadError'))
         }
       })
       .finally(() => {
@@ -51,7 +53,7 @@ export function AdminUsersPage() {
     return () => {
       cancelled = true
     }
-  }, [setUser, user])
+  }, [setUser, t, user])
 
   const filteredUsers = useMemo(() => {
     const needle = query.trim().toLowerCase()
@@ -77,31 +79,38 @@ export function AdminUsersPage() {
     <Box className="page-stack">
       <Box className="page-heading">
         <Box>
-          <Text as="h1">Admin users</Text>
-          <Text as="p">Review account state, sync usage, bans, and active locks.</Text>
+          <Text as="h1">{t('admin.users.title')}</Text>
+          <Text as="p">{t('admin.users.description')}</Text>
         </Box>
         <Box className="search-box">
           <SearchIcon size={16} aria-hidden="true" />
-          <input className="search-input" value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Search users" />
+          <input
+            className="search-input"
+            value={query}
+            onChange={(event) => setQuery(event.target.value)}
+            placeholder={t('admin.users.searchPlaceholder')}
+          />
         </Box>
       </Box>
-      {error ? <ErrorBanner title="Access denied" message={error} /> : null}
+      {error ? <ErrorBanner title={t('admin.accessDeniedTitle')} message={error} /> : null}
       {isLoading ? <LoadingState /> : null}
-      {!isLoading && filteredUsers.length === 0 ? <EmptyState title="No users found" message="No users match the current filter." /> : null}
+      {!isLoading && filteredUsers.length === 0 ? (
+        <EmptyState title={t('admin.users.emptyTitle')} message={t('admin.users.emptyMessage')} />
+      ) : null}
       {filteredUsers.length > 0 ? (
         <Box className="table-panel">
           <table>
             <thead>
               <tr>
-                <th>User</th>
-                <th>Role</th>
-                <th>Profiles</th>
-                <th>Storage</th>
-                <th>Last login</th>
-                <th>Last submod use</th>
-                <th>Last upload</th>
-                <th>Lock</th>
-                <th>Ban</th>
+                <th>{t('admin.users.user')}</th>
+                <th>{t('admin.users.role')}</th>
+                <th>{t('admin.users.profiles')}</th>
+                <th>{t('admin.users.storage')}</th>
+                <th>{t('admin.users.lastLogin')}</th>
+                <th>{t('admin.users.lastSubmodUse')}</th>
+                <th>{t('admin.users.lastUpload')}</th>
+                <th>{t('admin.users.lock')}</th>
+                <th>{t('admin.users.ban')}</th>
               </tr>
             </thead>
             <tbody>
@@ -146,6 +155,7 @@ export function AdminUsersPage() {
 }
 
 function OpenProfileById() {
+  const {t} = useTranslation()
   const [profileId, setProfileId] = useState('')
   const navigate = useNavigate()
   return (
@@ -159,10 +169,10 @@ function OpenProfileById() {
       }}
     >
       <label className="field inline-field">
-        <span>Open profile by ID</span>
+        <span>{t('admin.users.openProfileById')}</span>
         <input value={profileId} onChange={(event) => setProfileId(event.target.value)} inputMode="numeric" />
       </label>
-      <Button type="submit">Open</Button>
+      <Button type="submit">{t('admin.users.open')}</Button>
     </form>
   )
 }
