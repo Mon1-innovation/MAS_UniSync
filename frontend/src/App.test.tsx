@@ -844,6 +844,7 @@ describe('App', () => {
             created_at: '2026-07-07T08:00:00',
             storage_usage: 12,
             storage_limit: 24,
+            lock_status: 'active',
           },
         })
       }
@@ -866,7 +867,7 @@ describe('App', () => {
               backup_date: '2026-07-07',
               version_id: 22,
               profile_id: 9,
-              sha256: 'sha-current',
+              sha256: 'sha-backup',
               size: 12,
               renpy_version: '8.2.3',
               mas_version: '0.12.15',
@@ -874,6 +875,9 @@ describe('App', () => {
             },
           ],
         })
+      }
+      if (input === '/account/profiles/9/lock/release' && init?.method === 'POST') {
+        return new Response(null, {status: 204})
       }
       if (input === '/account/profiles/9/persistent/current/download') {
         return blob('current-bytes')
@@ -899,12 +903,24 @@ describe('App', () => {
     expect(screen.getByRole('progressbar', {name: /存储用量/i})).toHaveAttribute('aria-valuenow', '50')
     expect(screen.getByText((_content, element) => element?.textContent === '12 B / 24 B')).toBeInTheDocument()
     expect(screen.getAllByText('12 B').length).toBeGreaterThanOrEqual(1)
-    expect(screen.getAllByText('sha-current').length).toBeGreaterThanOrEqual(1)
+    expect(screen.queryByText('sha-current')).not.toBeInTheDocument()
+    expect(screen.getByText(/(Lock status|锁状态)/i)).toBeInTheDocument()
+    expect(screen.getByText(/(locked|已锁定)/i)).toBeInTheDocument()
+    expect(screen.getByRole('button', {name: /^(unlock|解锁)$/i})).toBeInTheDocument()
     expect(screen.getByText('2026-07-07')).toBeInTheDocument()
+    expect(screen.getByText('sha-backup')).toBeInTheDocument()
+
+    await userEvent.click(screen.getByRole('button', {name: /^(unlock|解锁)$/i}))
+    await waitFor(() => expect(screen.getAllByRole('button', {name: /^(unlock|解锁)$/i})).toHaveLength(2))
+    await userEvent.click(screen.getAllByRole('button', {name: /^(unlock|解锁)$/i})[1])
+
+    await waitFor(() => expect(screen.getByText(/(unlocked|未锁定)/i)).toBeInTheDocument())
+    expect(screen.queryByRole('button', {name: /^(unlock|解锁)$/i})).not.toBeInTheDocument()
 
     await userEvent.click(screen.getByRole('button', {name: /(download current|下载当前文件)/i}))
     await userEvent.click(screen.getByRole('button', {name: /(download backup 2026-07-07|下载 2026-07-07 的备份)/i}))
 
+    expectFetchCalled('/account/profiles/9/lock/release', {method: 'POST'})
     expectFetchCalled('/account/profiles/9/persistent/current/download')
     expectFetchCalled('/account/profiles/9/persistent/backups/5/download')
   })

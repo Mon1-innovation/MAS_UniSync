@@ -357,6 +357,42 @@ def test_account_profile_detail_exposes_owned_persistent_files(client):
     assert backup_download.content == b"first"
 
 
+def test_account_profile_detail_reports_current_lock_status(client):
+    profile = new_profile(client)
+    key = profile["profile_key"]
+    acquire_lock(client, key)
+
+    detail = client.get(f"/account/profiles/{profile['id']}")
+
+    assert detail.status_code == 200
+    assert detail.json()["profile"]["lock_status"] == "active"
+
+    future = (datetime.now(timezone.utc) + timedelta(seconds=61)).isoformat()
+    expired_detail = client.get(f"/account/profiles/{profile['id']}", headers={"X-Test-Now": future})
+
+    assert expired_detail.status_code == 200
+    assert expired_detail.json()["profile"]["lock_status"] == "none"
+
+
+def test_account_profile_lock_release_deletes_owned_lock_and_is_idempotent(client):
+    profile = new_profile(client)
+    key = profile["profile_key"]
+    acquire_lock(client, key)
+
+    released = client.post(f"/account/profiles/{profile['id']}/lock/release")
+
+    assert released.status_code == 204
+    assert client.get(f"/account/profiles/{profile['id']}").json()["profile"]["lock_status"] == "none"
+
+    second_release = client.post(f"/account/profiles/{profile['id']}/lock/release")
+
+    assert second_release.status_code == 204
+    assert client.post("/v1/locks/acquire", headers={"X-MAS-Profile-Key": key}).status_code == 200
+    with client.app.state.SessionLocal() as db:
+        actions = [log.action for log in db.scalars(select(AuditLog).order_by(AuditLog.id))]
+    assert "profile.lock.release" in actions
+
+
 def test_admin_profile_detail_lists_persistent_backups(client):
     profile = new_profile(client)
     key = profile["profile_key"]
@@ -421,6 +457,10 @@ def test_account_profile_detail_rejects_profiles_owned_by_other_users(client):
         response = client.get(url)
         assert response.status_code == 404
         assert response.json()["detail"]["code"] == "profile_not_found"
+
+    released = client.post(f"/account/profiles/{profile['id']}/lock/release")
+    assert released.status_code == 404
+    assert released.json()["detail"]["code"] == "profile_not_found"
 
 
 def test_user_and_admin_backup_restore_update_current(client):
