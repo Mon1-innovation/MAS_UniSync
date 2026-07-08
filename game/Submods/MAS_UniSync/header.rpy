@@ -23,7 +23,7 @@ init -990 python:
         basestring = str
 
     store.mas_submod_utils.Submod(
-        author="MAS UniSync",
+        author="P",
         name="MAS UniSync",
         description=_("Cross-device persistent synchronization for Monika After Story."),
         version=mas_unisync_version,
