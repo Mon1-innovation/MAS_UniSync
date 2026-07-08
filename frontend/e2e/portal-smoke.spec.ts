@@ -119,6 +119,16 @@ test.beforeEach(async ({page, context}) => {
       return
     }
 
+    if (path === '/admin/profiles/42/persistent/current') {
+      await route.fulfill({status: 404, json: {detail: {code: 'no_current_persistent'}}})
+      return
+    }
+
+    if (path === '/admin/profiles/42/persistent/backups') {
+      await route.fulfill({json: {items: []}})
+      return
+    }
+
     await route.fallback()
   })
 })
@@ -137,6 +147,7 @@ test('normal user can sign in, create, and copy a profile key', async ({page}) =
 
   await page.getByRole('button', {name: /copy profile key/i}).click()
   await expect(page.locator('.copyable-secret button').filter({hasText: 'Copied'})).toBeVisible()
+  await expect.poll(() => page.evaluate(() => navigator.clipboard.readText())).toBe('maspk_smoke')
 })
 
 test('admin can view users, audit logs, and open a dangerous action dialog', async ({page}) => {
