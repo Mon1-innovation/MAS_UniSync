@@ -16,6 +16,10 @@ class UniSyncError(Exception):
     pass
 
 
+class UniSyncLockNotHeldError(UniSyncError):
+    pass
+
+
 class SyncStatus(object):
     def __init__(self):
         self.enabled = False
@@ -322,7 +326,7 @@ def reload_persistent_from_remote(api_url, profile_key, savedir, early_log=None)
         if early_log is not None:
             early_log.debug("reload_persistent: lock acquire failed: " + str(_exc))
         if getattr(_exc, "status", None) == 409 or getattr(_exc, "code", None) == "lock_held":
-            raise UniSyncError(
+            raise UniSyncLockNotHeldError(
                 "Unable to reload persistent: the sync lock is held by another client. "
                 "Close other MAS instances or wait about 60 seconds for the lease to expire, then restart."
             )

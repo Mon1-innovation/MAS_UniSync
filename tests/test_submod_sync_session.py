@@ -6,6 +6,8 @@ import sys
 from pathlib import Path
 from urllib.error import HTTPError
 
+import pytest
+
 
 sys.dont_write_bytecode = True
 CLIENT_DIR = Path("game/Submods/MAS_UniSync")
@@ -151,6 +153,35 @@ def test_fetch_profile_keys_url_requests_public_config_from_api_url():
 
     assert result == "https://portal.example.test/account/profile-keys"
     assert len(requests) == 1
+
+
+def test_acquire_lock_raises_lock_not_held_error_when_server_reports_conflict(tmp_path):
+    sync = load_client_module("mas_unisync_sync")
+    persistent = tmp_path / "persistent"
+    persistent.write_bytes(b"local")
+
+    def fake_urlopen(request, timeout):
+        if request.full_url.endswith("/v1/locks/acquire"):
+            raise HTTPError(
+                request.full_url,
+                409,
+                "Conflict",
+                hdrs=None,
+                fp=FakeResponse(409, {"detail": {"code": "lock_held"}}),
+            )
+        raise AssertionError(f"unexpected URL {request.full_url}")
+
+    session = sync.SyncSession(
+        "100.72.137.92",
+        "maspk_test",
+        str(persistent),
+        str(tmp_path / "backups"),
+        urlopen=fake_urlopen,
+    )
+
+    assert issubclass(sync.core.UniSyncLockNotHeldError, sync.core.UniSyncError)
+    with pytest.raises(sync.core.UniSyncLockNotHeldError):
+        session.acquire_lock()
 
 
 def test_start_can_upload_local_persistent_when_remote_has_no_current_file(tmp_path):

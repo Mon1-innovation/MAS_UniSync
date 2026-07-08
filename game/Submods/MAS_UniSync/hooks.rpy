@@ -5,11 +5,13 @@ init -968 python:
     import threading
     import time
 
+    MAS_UNISYNC_LOCK_NOT_HELD_CHKSUM = "Unisync_lock_not_held"
     mas_unisync_session = None
     mas_unisync_upload_thread = None
     mas_unisync_heartbeat_thread = None
     mas_unisync_stop_event = threading.Event()
     mas_unisync_original_persistent_save = None
+    mas_unisync_lock_not_held = False
 
     def mas_unisync_savedir():
         return renpy.config.savedir
@@ -48,6 +50,34 @@ init -968 python:
             mas_version=mas_version
         )
 
+    def mas_unisync_enter_lock_not_held_mode(reason=None):
+        global mas_unisync_lock_not_held
+        mas_unisync_lock_not_held = True
+        message = "MAS UniSync lock is not held; persistent save and upload are disabled"
+        if reason is not None:
+            message = message + ": " + mas_unisync_core.text_type(reason)
+        try:
+            persistent._mas_moni_chksum = MAS_UNISYNC_LOCK_NOT_HELD_CHKSUM
+        except Exception:
+            pass
+        mas_unisync_status["sync_status"] = "disabled"
+        mas_unisync_status["lock_state"] = "not_held"
+        mas_unisync_status["last_error"] = mas_unisync_core.renpy_safe_text(message)
+        try:
+            if mas_unisync_session is not None:
+                mas_unisync_session.status.enabled = False
+                mas_unisync_session.status.lock_state = "not_held"
+                mas_unisync_session.status.lease_token = ""
+                mas_unisync_session.status.mark_error_full(message)
+        except Exception:
+            pass
+        mas_unisync_core.submod_log_error(message)
+        try:
+            renpy.show_screen("mas_unisync_lock_not_held_warning")
+        except Exception:
+            pass
+        return None
+
     def mas_unisync_start_heartbeat():
         global mas_unisync_heartbeat_thread
         if mas_unisync_session is None:
@@ -70,9 +100,10 @@ init -968 python:
         mas_unisync_heartbeat_thread.start()
 
     def mas_unisync_startup_sync(force=False, raise_on_failure=False, upload_after_sync=False):
-        global mas_unisync_session
+        global mas_unisync_session, mas_unisync_lock_not_held
         profile_key = mas_unisync_get_profile_key()
         if not profile_key:
+            mas_unisync_lock_not_held = False
             mas_unisync_update_status(message="")
             mas_unisync_status["sync_status"] = "disabled"
             mas_unisync_status["lock_state"] = "unlocked"
@@ -82,9 +113,16 @@ init -968 python:
         mas_unisync_session = mas_unisync_make_session()
         try:
             mas_unisync_session.start(upload_after_sync=upload_after_sync)
+            mas_unisync_lock_not_held = False
             mas_unisync_update_status(mas_unisync_session.status)
+            try:
+                renpy.hide_screen("mas_unisync_lock_not_held_warning")
+            except Exception:
+                pass
             mas_unisync_start_heartbeat()
             return mas_unisync_session
+        except mas_unisync_core.UniSyncLockNotHeldError as exc:
+            return mas_unisync_enter_lock_not_held_mode(exc)
         except Exception as exc:
             mas_unisync_core.submod_log_debug(str(exc))
             mas_unisync_session.status.mark_error(exc)
@@ -110,6 +148,8 @@ init -968 python:
                 mas_unisync_savedir(),
                 early_log=_early_log,
             )
+        except mas_unisync_core.UniSyncLockNotHeldError as exc:
+            return mas_unisync_enter_lock_not_held_mode(exc)
         except mas_unisync_core.UniSyncError:
             raise
         except Exception as exc:
@@ -118,6 +158,10 @@ init -968 python:
             return None
 
     def mas_unisync_validate_persistent_for_upload(raise_on_failure=False):
+        if mas_unisync_lock_not_held:
+            if raise_on_failure:
+                raise mas_unisync_core.UniSyncLockNotHeldError("sync lock is not held")
+            return False
         if mas_unisync_session is None or not mas_unisync_session.status.enabled:
             return False
         validate = getattr(mas_unisync_guard, "validate_persistent_dict", None)
@@ -176,6 +220,8 @@ init -968 python:
         return None
 
     def mas_unisync_upload_now(raise_on_failure=False, force=False):
+        if mas_unisync_lock_not_held:
+            return None
         if not mas_unisync_validate_persistent_for_upload(raise_on_failure=raise_on_failure):
             return None
         try:
@@ -195,6 +241,8 @@ init -968 python:
 
     def mas_unisync_enqueue_upload():
         global mas_unisync_upload_thread
+        if mas_unisync_lock_not_held:
+            return
         if mas_unisync_session is None or not mas_unisync_session.status.enabled:
             return
         if mas_unisync_upload_thread is not None and mas_unisync_upload_thread.is_alive():
@@ -216,6 +264,8 @@ init -968 python:
         mas_unisync_upload_thread.start()
 
     def mas_unisync_wrapped_persistent_save():
+        if mas_unisync_lock_not_held:
+            return None
         if not mas_unisync_guard_enabled():
             return mas_unisync_original_persistent_save()
         _issues = mas_unisync_find_persistent_issues()
@@ -233,6 +283,13 @@ init -968 python:
         mas_unisync_original_persistent_save = renpy.persistent.save
         renpy.persistent.save = mas_unisync_wrapped_persistent_save
 
+    def mas_unisync_install_lock_not_held_overlay():
+        try:
+            if "mas_unisync_lock_not_held_overlay" not in config.overlay_screens:
+                config.overlay_screens.append("mas_unisync_lock_not_held_overlay")
+        except Exception:
+            pass
+
     def mas_unisync_test_connection():
         try:
             session = mas_unisync_startup_sync(force=True, raise_on_failure=True)
@@ -246,6 +303,9 @@ init -968 python:
     def mas_unisync_manual_upload():
         global mas_unisync_session
         try:
+            if mas_unisync_lock_not_held:
+                renpy.notify(_("MAS UniSync 未持有同步锁，已禁用上传"))
+                return
             if not mas_unisync_get_profile_key():
                 mas_unisync_update_status(message="MAS UniSync profile key is not configured")
                 renpy.notify(_("MAS UniSync profile key is not configured"))
@@ -270,6 +330,8 @@ init -968 python:
             renpy.restart_interaction()
 
     def mas_unisync_shutdown():
+        if mas_unisync_lock_not_held:
+            return
         mas_unisync_stop_event.set()
         if mas_unisync_upload_thread is not None and mas_unisync_upload_thread.is_alive():
             mas_unisync_upload_thread.join(5.0)
@@ -280,11 +342,12 @@ init -968 python:
 
     mas_unisync_cleanup_for_renpy6()
     mas_unisync_install_save_hook()
+    mas_unisync_install_lock_not_held_overlay()
 
     mas_unisync_reload_persistent_after_api_keys()
 
     # If API keys are configured, start a fresh session after direct reload.
-    if mas_unisync_session is None:
+    if mas_unisync_session is None and not mas_unisync_lock_not_held:
         _api_url = mas_unisync_get_host()
         _profile_key = mas_unisync_get_profile_key()
         if _api_url and _profile_key:
@@ -294,6 +357,8 @@ init -968 python:
 init python:
     @store.mas_submod_utils.functionplugin("_quit", priority=-100)
     def mas_unisync_on_quit():
+        if mas_unisync_lock_not_held:
+            return
         if not mas_unisync_guard_enabled():
             renpy.persistent.save()
             return

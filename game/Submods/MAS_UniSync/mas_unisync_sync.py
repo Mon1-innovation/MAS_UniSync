@@ -76,7 +76,7 @@ class SyncSession(object):
             payload = self.request_json("POST", "/v1/locks/acquire", headers=self.headers(), data=b"")
         except http.UniSyncHTTPError as exc:
             if exc.status == 409:
-                raise core.UniSyncError(
+                raise core.UniSyncLockNotHeldError(
                     "Unable to acquire sync lock: the lock is held by another client. "
                     "Please check other devices or wait ~60 seconds for the lease to expire."
                 )

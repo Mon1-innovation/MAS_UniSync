@@ -355,6 +355,24 @@ screen mas_unisync_persistent_guard_detail():
                     style "mas_button_simple"
                     action Hide("mas_unisync_persistent_guard_detail")
 
+screen mas_unisync_lock_not_held_warning():
+    zorder 220
+    frame:
+        align (0.98, 0.04)
+        xmaximum 420
+        padding (14, 12)
+        vbox:
+            spacing 8
+            text _("[m_name]似乎不在这里呢..."):
+                style "main_menu_version"
+            textbutton _("退出游戏"):
+                style "mas_button_simple"
+                action Function(renpy.quit, relaunch=False)
+
+screen mas_unisync_lock_not_held_overlay():
+    if mas_unisync_lock_not_held:
+        use mas_unisync_lock_not_held_warning
+
 screen mas_unisync_settingpane():
     python:
         _status = mas_unisync_status if isinstance(mas_unisync_status, dict) else {}

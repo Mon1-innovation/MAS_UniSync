@@ -213,6 +213,59 @@ def test_persistent_guard_screens_and_settings_entry_exist():
     assert "查看 persistent 非标准 class" in header_source
 
 
+def test_lock_not_held_mode_blocks_save_upload_and_shows_quit_prompt():
+    header_source = Path("game/Submods/MAS_UniSync/header.rpy").read_text(
+        encoding="utf-8"
+    )
+    hooks_source = Path("game/Submods/MAS_UniSync/hooks.rpy").read_text(
+        encoding="utf-8"
+    )
+    wrapped_save_source = hooks_source.split(
+        "def mas_unisync_wrapped_persistent_save():", 1
+    )[1].split(
+        "    def mas_unisync_install_save_hook():",
+        1,
+    )[0]
+    upload_now_source = hooks_source.split(
+        "def mas_unisync_upload_now(raise_on_failure=False, force=False):", 1
+    )[1].split(
+        "    def mas_unisync_enqueue_upload():",
+        1,
+    )[0]
+    enqueue_source = hooks_source.split(
+        "def mas_unisync_enqueue_upload():", 1
+    )[1].split(
+        "    def mas_unisync_wrapped_persistent_save():",
+        1,
+    )[0]
+
+    assert 'MAS_UNISYNC_LOCK_NOT_HELD_CHKSUM = "Unisync_lock_not_held"' in hooks_source
+    assert "mas_unisync_enter_lock_not_held_mode" in hooks_source
+    assert "persistent._mas_moni_chksum = MAS_UNISYNC_LOCK_NOT_HELD_CHKSUM" in hooks_source
+    assert 'renpy.show_screen("mas_unisync_lock_not_held_warning")' in hooks_source
+    assert 'config.overlay_screens.append("mas_unisync_lock_not_held_overlay")' in hooks_source
+    assert "except mas_unisync_core.UniSyncLockNotHeldError as exc:" in hooks_source
+    assert "mas_unisync_enter_lock_not_held_mode(exc)" in hooks_source
+
+    assert "if mas_unisync_lock_not_held:" in wrapped_save_source
+    assert wrapped_save_source.index("if mas_unisync_lock_not_held:") < wrapped_save_source.index(
+        "mas_unisync_original_persistent_save()"
+    )
+    assert "return None" in wrapped_save_source.split("if mas_unisync_lock_not_held:", 1)[1].split(
+        "mas_unisync_original_persistent_save()", 1
+    )[0]
+    assert "if mas_unisync_lock_not_held:" in upload_now_source
+    assert "if mas_unisync_lock_not_held:" in enqueue_source
+
+    assert "screen mas_unisync_lock_not_held_warning():" in header_source
+    assert "screen mas_unisync_lock_not_held_overlay():" in header_source
+    assert "if mas_unisync_lock_not_held:" in header_source
+    assert "align (0.98, 0.04)" in header_source
+    assert "[m_name]似乎不在这里呢..." in header_source
+    assert 'textbutton _("退出游戏")' in header_source
+    assert "Function(renpy.quit, relaunch=False)" in header_source
+
+
 def test_persistent_guard_runtime_state_is_not_stored_in_persistent():
     header_source = Path("game/Submods/MAS_UniSync/header.rpy").read_text(
         encoding="utf-8"
