@@ -124,7 +124,7 @@ def test_settings_panel_exposes_manual_upload_button():
     )
 
     assert "def mas_unisync_manual_upload():" in hooks_source
-    assert 'textbutton _("Upload Now")' in header_source
+    assert 'textbutton _("立即上传")' in header_source
     assert "action Function(mas_unisync_manual_upload)" in header_source
 
 
