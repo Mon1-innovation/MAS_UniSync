@@ -1,5 +1,5 @@
 import {Box, Button, Text} from '@primer/react'
-import {ArrowLeftIcon, DownloadIcon, VersionsIcon} from '@primer/octicons-react'
+import {ArrowLeftIcon, DownloadIcon, UnlockIcon, VersionsIcon} from '@primer/octicons-react'
 import {useEffect, useState} from 'react'
 import type {ReactNode} from 'react'
 import {useTranslation} from 'react-i18next'
@@ -11,9 +11,11 @@ import {
   getAccountCurrentPersistent,
   getAccountProfile,
   listAccountBackups,
+  releaseAccountProfileLock,
 } from '../api/profileKeysApi'
 import type {Backup, Profile, Version} from '../api/types'
 import {ByteSize} from '../components/ByteSize'
+import {ConfirmDialog} from '../components/ConfirmDialog'
 import {CopyableSecret} from '../components/CopyableSecret'
 import {EmptyState} from '../components/EmptyState'
 import {ErrorBanner} from '../components/ErrorBanner'
@@ -32,6 +34,8 @@ export function ProfileDetailPage() {
   const [error, setError] = useState<string | null>(null)
   const [isLoading, setIsLoading] = useState(true)
   const [downloadingId, setDownloadingId] = useState<number | 'current' | null>(null)
+  const [isBusy, setIsBusy] = useState(false)
+  const [isUnlockConfirmOpen, setIsUnlockConfirmOpen] = useState(false)
 
   useEffect(() => {
     let cancelled = false
@@ -90,6 +94,23 @@ export function ProfileDetailPage() {
     }
   }
 
+  async function handleReleaseLock() {
+    if (!profile) return
+    setIsBusy(true)
+    setError(null)
+    try {
+      await releaseAccountProfileLock(profile.id)
+      setProfile((currentProfile) => (currentProfile ? {...currentProfile, lock_status: 'none'} : currentProfile))
+      setIsUnlockConfirmOpen(false)
+    } catch {
+      setError(t('account.profileDetail.releaseLockError'))
+    } finally {
+      setIsBusy(false)
+    }
+  }
+
+  const lockLabelStatus = profile?.lock_status === 'active' ? 'locked' : 'unlocked'
+
   return (
     <Box className="page-stack">
       {error ? <ErrorBanner message={error} /> : null}
@@ -139,16 +160,23 @@ export function ProfileDetailPage() {
                   </Text>
                 ) : null}
               </Box>
-              {current ? (
-                <Button type="button" leadingVisual={DownloadIcon} onClick={handleDownloadCurrent} disabled={downloadingId === 'current'}>
-                  {t('account.profileDetail.downloadCurrent')}
-                </Button>
-              ) : null}
+              <Box sx={{display: 'flex', gap: 2, flexWrap: 'wrap'}}>
+                {profile.lock_status === 'active' ? (
+                  <Button type="button" leadingVisual={UnlockIcon} onClick={() => setIsUnlockConfirmOpen(true)}>
+                    {t('account.profileDetail.unlock')}
+                  </Button>
+                ) : null}
+                {current ? (
+                  <Button type="button" leadingVisual={DownloadIcon} onClick={handleDownloadCurrent} disabled={downloadingId === 'current'}>
+                    {t('account.profileDetail.downloadCurrent')}
+                  </Button>
+                ) : null}
+              </Box>
             </Box>
             {current ? (
               <Box className="info-grid">
                 <Info label={t('account.profileDetail.size')} value={<ByteSize value={current.size} />} />
-                <Info label="SHA-256" value={<code className="truncate">{current.sha256}</code>} />
+                <Info label={t('account.profileDetail.lockStatus')} value={<StatusLabel status={lockLabelStatus} />} />
                 <Info label="Ren'Py" value={current.renpy_version || t('account.profileDetail.unknown')} />
                 <Info label="MAS" value={current.mas_version || t('account.profileDetail.unknown')} />
               </Box>
@@ -218,6 +246,17 @@ export function ProfileDetailPage() {
             )}
           </Box>
         </>
+      ) : null}
+      {isUnlockConfirmOpen ? (
+        <ConfirmDialog
+          title={t('account.profileDetail.releaseLockTitle')}
+          message={t('account.profileDetail.releaseLockMessage')}
+          confirmText={t('account.profileDetail.unlock')}
+          variant="primary"
+          onConfirm={handleReleaseLock}
+          onCancel={() => setIsUnlockConfirmOpen(false)}
+          isBusy={isBusy}
+        />
       ) : null}
     </Box>
   )

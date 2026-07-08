@@ -36,6 +36,10 @@ export function listAccountBackups(profileId: number) {
   return request<ListResponse<Backup>>(`/account/profiles/${profileId}/persistent/backups`)
 }
 
+export function releaseAccountProfileLock(profileId: number) {
+  return request<void>(`/account/profiles/${profileId}/lock/release`, {method: 'POST'})
+}
+
 export function downloadAccountCurrentPersistent(profileId: number) {
   return downloadBlob(`/account/profiles/${profileId}/persistent/current/download`)
 }

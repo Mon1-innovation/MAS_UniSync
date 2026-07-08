@@ -26,6 +26,7 @@ export interface Profile {
   profile_key: string
   storage_usage: number
   storage_limit: number
+  lock_status: 'active' | 'none' | string
   revoked_at: string | null
   last_used_at: string | null
   last_upload_at: string | null
