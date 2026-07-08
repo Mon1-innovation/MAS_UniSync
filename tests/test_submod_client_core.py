@@ -147,6 +147,43 @@ def test_load_pickle_payload_accepts_python2_datetime_binary_state():
     assert core.load_pickle_payload(py2_datetime_pickle) == dt.datetime(2026, 7, 8, 15, 53, 17)
 
 
+def test_cleanup_current_eli_data_clears_missing_event_label():
+    core = load_client_module("mas_unisync_core")
+
+    class Persistent:
+        pass
+
+    persistent = Persistent()
+    persistent._mas_curr_eli_data = ("remote_only_topic", False, {"source": "remote"})
+
+    changed = core.cleanup_current_eli_data_for_device(
+        persistent,
+        lambda label: label == "local_topic",
+    )
+
+    assert changed is True
+    assert persistent._mas_curr_eli_data is None
+
+
+def test_cleanup_current_eli_data_keeps_existing_event_label():
+    core = load_client_module("mas_unisync_core")
+
+    class Persistent:
+        pass
+
+    persistent = Persistent()
+    eli_data = ("local_topic", True, {"source": "local"})
+    persistent._mas_curr_eli_data = eli_data
+
+    changed = core.cleanup_current_eli_data_for_device(
+        persistent,
+        lambda label: label == "local_topic",
+    )
+
+    assert changed is False
+    assert persistent._mas_curr_eli_data == eli_data
+
+
 def test_display_text_escapes_braces_used_by_renpy_substitution():
     core = load_client_module("mas_unisync_core")
 

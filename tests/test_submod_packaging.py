@@ -58,6 +58,21 @@ def test_persistent_reload_keeps_direct_in_memory_replacement():
     assert "renpy.game.persistent._update()" in core_source
 
 
+def test_remote_persistent_current_eli_data_is_cleaned_after_in_memory_replacement():
+    core_source = Path("game/Submods/MAS_UniSync/mas_unisync_core.py").read_text(
+        encoding="utf-8"
+    )
+    replacement_index = core_source.index(
+        "renpy.game.persistent.__dict__.update(remote_persistent.__dict__)"
+    )
+    cleanup_index = core_source.index(
+        "cleanup_current_eli_data_for_device(renpy.game.persistent, renpy.has_label)"
+    )
+    update_index = core_source.index("renpy.game.persistent._update()")
+
+    assert replacement_index < cleanup_index < update_index
+
+
 def test_submod_http_does_not_import_uuid_module_missing_from_renpy_699():
     http_source = Path("game/Submods/MAS_UniSync/mas_unisync_http.py").read_text(
         encoding="utf-8"

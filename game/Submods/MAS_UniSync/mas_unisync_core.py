@@ -249,12 +249,31 @@ def load_pickle_payload(payload):
         return _pickle.loads(payload)
 
 
+def cleanup_current_eli_data_for_device(persistent_obj, has_label):
+    eli_data = getattr(persistent_obj, "_mas_curr_eli_data", None)
+    if eli_data is None:
+        return False
 
+    try:
+        event_label = eli_data[0]
+    except Exception:
+        persistent_obj._mas_curr_eli_data = None
+        return True
 
+    if not event_label:
+        persistent_obj._mas_curr_eli_data = None
+        return True
 
+    try:
+        label_exists = bool(has_label(text_type(event_label)))
+    except Exception:
+        return False
 
+    if label_exists:
+        return False
 
-
+    persistent_obj._mas_curr_eli_data = None
+    return True
 
 
 def reload_persistent_from_remote(api_url, profile_key, savedir, early_log=None):
@@ -375,6 +394,7 @@ def reload_persistent_from_remote(api_url, profile_key, savedir, early_log=None)
             early_log.debug('reload_persistent: downloading persistent from remote')
         renpy.game.persistent.__dict__.clear()
         renpy.game.persistent.__dict__.update(remote_persistent.__dict__)
+        cleanup_current_eli_data_for_device(renpy.game.persistent, renpy.has_label)
         renpy.game.persistent._update()
 
         if early_log is not None:
