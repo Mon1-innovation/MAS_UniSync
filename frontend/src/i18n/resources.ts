@@ -6,6 +6,7 @@ export const resources = {
         copied: '已复制',
         copy: '复制',
         copyProfileKey: '复制 Profile Key',
+        checkingSession: '正在检查会话',
         loading: '加载中',
         never: '从未',
         somethingWentWrong: '出现问题',
@@ -114,7 +115,6 @@ export const resources = {
       admin: {
         accessDeniedTitle: '拒绝访问',
         accessDeniedMessage: '你的账户没有权限访问管理区域。',
-        checkingSession: '正在检查会话',
         users: {
           title: '管理员用户',
           description: '查看账户状态、同步用量、封禁和活动锁。',
@@ -261,6 +261,7 @@ export const resources = {
         copied: 'Copied',
         copy: 'Copy',
         copyProfileKey: 'Copy profile key',
+        checkingSession: 'Checking session',
         loading: 'Loading',
         never: 'Never',
         somethingWentWrong: 'Something went wrong',
@@ -370,7 +371,6 @@ export const resources = {
       admin: {
         accessDeniedTitle: 'Access denied',
         accessDeniedMessage: 'Your account does not have access to the admin area.',
-        checkingSession: 'Checking session',
         users: {
           title: 'Admin users',
           description: 'Review account state, sync usage, bans, and active locks.',

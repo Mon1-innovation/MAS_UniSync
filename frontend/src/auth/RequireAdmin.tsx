@@ -9,7 +9,7 @@ export function RequireAdmin({children}: {children: React.ReactNode}) {
   const {user, isCheckingSession} = useAuth()
 
   if (isCheckingSession) {
-    return <LoadingState label={t('admin.checkingSession')} />
+    return <LoadingState label={t('common.checkingSession')} />
   }
 
   if (!user) {
