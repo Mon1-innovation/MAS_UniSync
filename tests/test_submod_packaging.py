@@ -143,6 +143,89 @@ def test_runtime_sync_status_is_not_stored_in_persistent():
     assert '"_mas_unisync_status"' in hooks_source
 
 
+def test_persistent_guard_hook_only_runs_when_unisync_is_enabled():
+    hooks_source = Path("game/Submods/MAS_UniSync/hooks.rpy").read_text(
+        encoding="utf-8"
+    )
+    wrapped_save_source = hooks_source.split(
+        "def mas_unisync_wrapped_persistent_save():", 1
+    )[1].split(
+        "    def mas_unisync_install_save_hook():",
+        1,
+    )[0]
+
+    assert "def mas_unisync_guard_enabled():" in hooks_source
+    assert "if not mas_unisync_get_profile_key():" in hooks_source
+    assert "if mas_unisync_session is None:" in hooks_source
+    assert "return bool(mas_unisync_session.status.enabled)" in hooks_source
+    assert "if not mas_unisync_guard_enabled():" in wrapped_save_source
+    assert "return mas_unisync_original_persistent_save()" in wrapped_save_source
+
+
+def test_persistent_guard_blocks_original_save_and_upload_when_issues_exist():
+    hooks_source = Path("game/Submods/MAS_UniSync/hooks.rpy").read_text(
+        encoding="utf-8"
+    )
+    wrapped_save_source = hooks_source.split(
+        "def mas_unisync_wrapped_persistent_save():", 1
+    )[1].split(
+        "    def mas_unisync_install_save_hook():",
+        1,
+    )[0]
+    issue_index = wrapped_save_source.index("mas_unisync_find_persistent_issues()")
+    original_save_index = wrapped_save_source.index("rv = mas_unisync_original_persistent_save()")
+    enqueue_index = wrapped_save_source.index("mas_unisync_enqueue_upload()")
+
+    assert issue_index < original_save_index < enqueue_index
+    assert "if _issues:" in wrapped_save_source
+    assert "return None" in wrapped_save_source.split("if _issues:", 1)[1].split(
+        "rv = mas_unisync_original_persistent_save()", 1
+    )[0]
+    assert "mas_unisync_enqueue_upload()" not in wrapped_save_source.split(
+        "if _issues:", 1
+    )[1].split("return None", 1)[0]
+    assert "renpy.show_screen(\"mas_unisync_persistent_guard_warning\")" in hooks_source
+
+
+def test_persistent_guard_quit_only_blocks_when_unisync_is_enabled():
+    hooks_source = Path("game/Submods/MAS_UniSync/hooks.rpy").read_text(
+        encoding="utf-8"
+    )
+    quit_source = hooks_source.split("def mas_unisync_on_quit():", 1)[1]
+
+    assert "if not mas_unisync_guard_enabled():" in quit_source
+    assert "mas_unisync_find_persistent_issues()" in quit_source
+    assert "MAS UniSync final persistent save blocked" in quit_source
+
+
+def test_persistent_guard_screens_and_settings_entry_exist():
+    header_source = Path("game/Submods/MAS_UniSync/header.rpy").read_text(
+        encoding="utf-8"
+    )
+
+    assert "mas_unisync_guard_state = {" in header_source
+    assert "default mas_unisync_guard_help_expanded = set()" in header_source
+    assert "screen mas_unisync_persistent_guard_warning():" in header_source
+    assert "screen mas_unisync_persistent_guard_detail():" in header_source
+    assert "当前 persistent 无法保存" in header_source
+    assert "带有这些 class 的 persistent 可能无法在其他客户端运行" in header_source
+    assert "Function(mas_unisync_delete_persistent_guard_issue" in header_source
+    assert "查看 persistent 非标准 class" in header_source
+
+
+def test_persistent_guard_runtime_state_is_not_stored_in_persistent():
+    header_source = Path("game/Submods/MAS_UniSync/header.rpy").read_text(
+        encoding="utf-8"
+    )
+    hooks_source = Path("game/Submods/MAS_UniSync/hooks.rpy").read_text(
+        encoding="utf-8"
+    )
+
+    assert "persistent._mas_unisync_guard" not in header_source
+    assert "persistent._mas_unisync_guard" not in hooks_source
+    assert "default persistent.mas_unisync_guard" not in header_source
+
+
 def test_manual_upload_button_uses_direct_upload_flow():
     hooks_source = Path("game/Submods/MAS_UniSync/hooks.rpy").read_text(
         encoding="utf-8"

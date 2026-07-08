@@ -38,6 +38,11 @@ init -989 python:
         "last_download_at": "",
         "last_error": "",
     }
+    mas_unisync_guard_state = {
+        "issues": [],
+        "message": "",
+        "last_blocked_at": "",
+    }
 
     def mas_unisync_get_api_url():
         try:
@@ -193,6 +198,53 @@ init -989 python:
         }
         return labels.get(value, value)
 
+    def mas_unisync_guard_runtime_enabled():
+        enabled = globals().get("mas_unisync_guard_enabled")
+        if enabled is None:
+            return False
+        try:
+            return bool(enabled())
+        except Exception:
+            return False
+
+    def mas_unisync_refresh_guard_issues():
+        global mas_unisync_guard_state
+        if not isinstance(mas_unisync_guard_state, dict):
+            mas_unisync_guard_state = {}
+        if not mas_unisync_guard_runtime_enabled():
+            mas_unisync_guard_state["issues"] = []
+            mas_unisync_guard_state["message"] = ""
+            return []
+        find_issues = globals().get("mas_unisync_find_persistent_issues")
+        if find_issues is None:
+            return []
+        issues = find_issues()
+        mas_unisync_guard_state["issues"] = issues
+        if not issues:
+            mas_unisync_guard_state["message"] = ""
+        return issues
+
+    def mas_unisync_open_persistent_guard_detail():
+        mas_unisync_refresh_guard_issues()
+        renpy.show_screen("mas_unisync_persistent_guard_detail")
+        renpy.restart_interaction()
+
+    def mas_unisync_delete_persistent_guard_issue(top_key):
+        try:
+            if top_key in persistent.__dict__:
+                del persistent.__dict__[top_key]
+        except Exception as exc:
+            mas_unisync_update_status(message=mas_unisync_core.renpy_safe_text(str(exc)))
+        mas_unisync_refresh_guard_issues()
+        renpy.restart_interaction()
+
+    def mas_unisync_toggle_guard_help(index):
+        if index in mas_unisync_guard_help_expanded:
+            mas_unisync_guard_help_expanded.remove(index)
+        else:
+            mas_unisync_guard_help_expanded.add(index)
+        renpy.restart_interaction()
+
 init -969 python:
     store.mas_registerAPIKey(
         mas_unisync_core.HOST_FEATURE,
@@ -204,6 +256,104 @@ init -969 python:
         _("MAS UniSync Profile Key"),
         mas_unisync_profile_key_on_change
     )
+
+default mas_unisync_guard_help_expanded = set()
+
+screen mas_unisync_persistent_guard_warning():
+    zorder 200
+    frame:
+        align (0.98, 0.04)
+        xmaximum 520
+        padding (14, 12)
+        vbox:
+            spacing 8
+            text _("MAS UniSync 已阻止 persistent 保存"):
+                style "main_menu_version"
+            text _("当前 persistent 无法保存，因为包含非标准 class。带有这些 class 的 persistent 可能无法在其他客户端运行。"):
+                style "main_menu_version"
+                size 16
+            hbox:
+                spacing 10
+                textbutton _("打开详情"):
+                    style "mas_button_simple"
+                    action Function(mas_unisync_open_persistent_guard_detail)
+                textbutton _("关闭"):
+                    style "mas_button_simple"
+                    action Hide("mas_unisync_persistent_guard_warning")
+
+screen mas_unisync_persistent_guard_detail():
+    zorder 201
+    modal True
+    python:
+        _guard_enabled = mas_unisync_guard_runtime_enabled()
+        _issues = mas_unisync_guard_state.get("issues", []) if isinstance(mas_unisync_guard_state, dict) else []
+
+    frame:
+        align (0.5, 0.5)
+        xmaximum 980
+        ymaximum 660
+        padding (18, 16)
+        vbox:
+            spacing 10
+            text _("persistent 非标准 class 检查"):
+                style "main_menu_version"
+            if not _guard_enabled:
+                text _("UniSync 未启用，当前不检查 persistent 非标准 class。"):
+                    style "main_menu_version"
+            elif not _issues:
+                text _("未检测到非标准 class。"):
+                    style "main_menu_version"
+            else:
+                text _("当前 persistent 无法保存，因为包含非标准 class。带有这些 class 的 persistent 可能无法在其他客户端运行。"):
+                    style "main_menu_version"
+                    size 16
+                viewport:
+                    mousewheel True
+                    draggable True
+                    ymaximum 470
+                    vbox:
+                        spacing 12
+                        for _index, _issue in enumerate(_issues):
+                            frame:
+                                xfill True
+                                padding (10, 8)
+                                vbox:
+                                    spacing 5
+                                    text _("属性名：") + mas_unisync_core.renpy_display_text(_issue.get("top_key", "")):
+                                        style "main_menu_version"
+                                        size 16
+                                    text _("完整路径：") + mas_unisync_core.renpy_display_text(_issue.get("path", "")):
+                                        style "main_menu_version"
+                                        size 16
+                                    text _("class：") + mas_unisync_core.renpy_display_text(_issue.get("type_name", "")):
+                                        style "main_menu_version"
+                                        size 16
+                                    text _("module：") + mas_unisync_core.renpy_display_text(_issue.get("module_name", "")):
+                                        style "main_menu_version"
+                                        size 16
+                                    text _("repr：") + mas_unisync_core.renpy_display_text(_issue.get("repr_text", "")):
+                                        style "main_menu_version"
+                                        size 16
+                                    hbox:
+                                        spacing 10
+                                        textbutton _("展开/收起 help()"):
+                                            style "mas_button_simple"
+                                            action Function(mas_unisync_toggle_guard_help, _index)
+                                        textbutton _("删除该 persistent 属性"):
+                                            style "mas_button_simple"
+                                            action Function(mas_unisync_delete_persistent_guard_issue, _issue.get("top_key", ""))
+                                    if _index in mas_unisync_guard_help_expanded:
+                                        text mas_unisync_core.renpy_display_text(_issue.get("help_text", "") or _("没有 help() 内容。")):
+                                            style "main_menu_version"
+                                            size 12
+            hbox:
+                spacing 10
+                textbutton _("刷新"):
+                    style "mas_button_simple"
+                    action Function(mas_unisync_refresh_guard_issues)
+                textbutton _("关闭"):
+                    style "mas_button_simple"
+                    action Hide("mas_unisync_persistent_guard_detail")
 
 screen mas_unisync_settingpane():
     python:
@@ -270,3 +420,6 @@ screen mas_unisync_settingpane():
             textbutton _("测试连接"):
                 style "mas_button_simple"
                 action Function(mas_unisync_test_connection)
+            textbutton _("查看 persistent 非标准 class"):
+                style "mas_button_simple"
+                action Function(mas_unisync_open_persistent_guard_detail)

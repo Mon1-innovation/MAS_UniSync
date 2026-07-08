@@ -90,13 +90,24 @@ def renpy_display_text(value):
     if value is None:
         return ""
     text = text_type(value)
-    return text.replace("{", "{{").replace("}", "}}")
+    return (
+        text.replace("{", "{{")
+        .replace("}", "}}")
+        .replace("[", "[[")
+        .replace("]", "]]")
+    )
 
 def renpy_safe_text(value):
-    """Escape curly braces so the string is safe for Ren'py text display (notify, dialog, etc.)."""
+    """Escape Ren'Py text interpolation/control delimiters for display."""
     if value is None:
         return ""
-    return text_type(value).replace('{', '{{').replace('}', '}}')
+    text = text_type(value)
+    return (
+        text.replace("{", "{{")
+        .replace("}", "}}")
+        .replace("[", "[[")
+        .replace("]", "]]")
+    )
 
 
 def iso_now():

@@ -134,6 +134,47 @@ init -968 python:
             return False
         return True
 
+    def mas_unisync_guard_enabled():
+        if not mas_unisync_get_profile_key():
+            return False
+        if mas_unisync_session is None:
+            return False
+        try:
+            return bool(mas_unisync_session.status.enabled)
+        except Exception:
+            return False
+
+    def mas_unisync_find_persistent_issues():
+        find_issues = getattr(mas_unisync_guard, "find_persistent_issues", None)
+        if find_issues is None:
+            return []
+        return find_issues(persistent.__dict__)
+
+    def mas_unisync_set_guard_issues(issues, message=None):
+        global mas_unisync_guard_state
+        if not isinstance(globals().get("mas_unisync_guard_state"), dict):
+            mas_unisync_guard_state = {}
+        mas_unisync_guard_state["issues"] = issues
+        mas_unisync_guard_state["last_blocked_at"] = mas_unisync_core.iso_now()
+        if message is not None:
+            mas_unisync_guard_state["message"] = message
+            mas_unisync_status["last_error"] = message
+            try:
+                mas_unisync_session.status.mark_error_full(message)
+            except Exception:
+                pass
+
+    def mas_unisync_block_persistent_save(issues):
+        count = len(issues)
+        message = "MAS UniSync blocked persistent save: {0} unsupported persistent value(s) found".format(count)
+        mas_unisync_set_guard_issues(issues, message=message)
+        mas_unisync_core.submod_log_error(message)
+        try:
+            renpy.show_screen("mas_unisync_persistent_guard_warning")
+        except Exception:
+            pass
+        return None
+
     def mas_unisync_upload_now(raise_on_failure=False, force=False):
         if not mas_unisync_validate_persistent_for_upload(raise_on_failure=raise_on_failure):
             return None
@@ -175,9 +216,14 @@ init -968 python:
         mas_unisync_upload_thread.start()
 
     def mas_unisync_wrapped_persistent_save():
+        if not mas_unisync_guard_enabled():
+            return mas_unisync_original_persistent_save()
+        _issues = mas_unisync_find_persistent_issues()
+        if _issues:
+            mas_unisync_block_persistent_save(_issues)
+            return None
         rv = mas_unisync_original_persistent_save()
-        if mas_unisync_session is not None:
-            mas_unisync_enqueue_upload()
+        mas_unisync_enqueue_upload()
         return rv
 
     def mas_unisync_install_save_hook():
@@ -248,9 +294,16 @@ init -968 python:
 init python:
     @store.mas_submod_utils.functionplugin("_quit", priority=-100)
     def mas_unisync_on_quit():
-        if mas_unisync_session is None:
+        if not mas_unisync_guard_enabled():
             renpy.persistent.save()
             return
+        _issues = mas_unisync_find_persistent_issues()
+        if _issues:
+            mas_unisync_block_persistent_save(_issues)
+            raise Exception(
+                "MAS UniSync final persistent save blocked because persistent contains unsupported class data. "
+                "Open MAS UniSync guard details and remove the listed persistent attributes before quitting."
+            )
         try:
             renpy.persistent.save()
             mas_unisync_shutdown()

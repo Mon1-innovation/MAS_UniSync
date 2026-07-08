@@ -3,6 +3,7 @@ from __future__ import annotations
 import datetime as dt
 import importlib.util
 import sys
+import builtins
 from pathlib import Path
 
 import pytest
@@ -184,12 +185,13 @@ def test_cleanup_current_eli_data_keeps_existing_event_label():
     assert persistent._mas_curr_eli_data == eli_data
 
 
-def test_display_text_escapes_braces_used_by_renpy_substitution():
+def test_display_text_escapes_braces_and_brackets_used_by_renpy_substitution():
     core = load_client_module("mas_unisync_core")
 
-    assert core.renpy_display_text('{"detail": {"code": "banned"}}') == (
-        '{{"detail": {{"code": "banned"}}}}'
+    assert core.renpy_display_text('{"detail": ["banned"]}') == (
+        '{{"detail": [[\"banned\"]]}}'
     )
+    assert core.renpy_safe_text("[persistent]{bad}") == "[[persistent]]{{bad}}"
     assert core.renpy_display_text(None) == ""
 
 
@@ -269,6 +271,75 @@ def test_persistent_guard_accepts_safe_types_and_rejects_custom_instances():
     valid, reason = guard.validate_persistent_dict({"bad": UnsafeThing()})
     assert valid is False
     assert "bad" in reason
+
+
+def test_persistent_guard_find_issues_lists_all_custom_instances_with_context():
+    guard = load_client_module("mas_unisync_guard")
+
+    class BadOne:
+        def __repr__(self):
+            return "<BadOne custom>"
+
+    class BadTwo:
+        pass
+
+    data = {
+        "first": BadOne(),
+        "nested": {"items": [BadTwo()]},
+    }
+
+    issues = guard.find_persistent_issues(data)
+
+    assert [issue["top_key"] for issue in issues] == ["first", "nested"]
+    assert [issue["path"] for issue in issues] == ["first", "nested.items[0]"]
+    assert [issue["type_name"] for issue in issues] == ["BadOne", "BadTwo"]
+    assert all(issue["module_name"] == __name__ for issue in issues)
+    assert issues[0]["repr_text"] == "<BadOne custom>"
+    assert set(issues[0]) == {
+        "top_key",
+        "path",
+        "type_name",
+        "module_name",
+        "repr_text",
+        "help_text",
+    }
+
+
+def test_persistent_guard_find_issues_survives_failing_repr():
+    guard = load_client_module("mas_unisync_guard")
+
+    class BrokenRepr:
+        def __repr__(self):
+            raise RuntimeError("repr exploded")
+
+    issues = guard.find_persistent_issues({"broken": BrokenRepr()})
+
+    assert len(issues) == 1
+    assert issues[0]["top_key"] == "broken"
+    assert issues[0]["path"] == "broken"
+    assert issues[0]["type_name"] == "BrokenRepr"
+    assert issues[0]["repr_text"].startswith("<repr failed: RuntimeError: repr exploded>")
+
+
+def test_persistent_guard_imports_and_scans_when_pydoc_is_unavailable(monkeypatch):
+    real_import = builtins.__import__
+
+    def fake_import(name, globals=None, locals=None, fromlist=(), level=0):
+        if name == "pydoc":
+            raise ImportError("pydoc unavailable")
+        return real_import(name, globals, locals, fromlist, level)
+
+    monkeypatch.setattr(builtins, "__import__", fake_import)
+    guard = load_client_module("mas_unisync_guard")
+
+    class NoDocs:
+        pass
+
+    issues = guard.find_persistent_issues({"bad": NoDocs()})
+
+    assert len(issues) == 1
+    assert issues[0]["type_name"] == "NoDocs"
+    assert issues[0]["help_text"] == ""
 
 
 def test_persistent_guard_rejects_timezone_aware_datetime_and_recursive_data():
