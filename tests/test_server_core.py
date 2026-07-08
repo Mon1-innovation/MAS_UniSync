@@ -336,7 +336,7 @@ def test_account_profile_detail_exposes_owned_persistent_files(client):
     detail = client.get(f"/account/profiles/{profile['id']}")
     assert detail.status_code == 200
     assert detail.json()["profile"]["id"] == profile["id"]
-    assert detail.json()["profile"]["storage_usage"] == len(b"second")
+    assert detail.json()["profile"]["storage_usage"] == len(b"first") + len(b"second")
 
     current = client.get(f"/account/profiles/{profile['id']}/persistent/current")
     assert current.status_code == 200
@@ -372,7 +372,7 @@ def test_admin_profile_detail_lists_persistent_backups(client):
 
     detail = client.get(f"/admin/profiles/{profile['id']}")
     assert detail.status_code == 200
-    assert detail.json()["profile"]["storage_usage"] == len(b"second")
+    assert detail.json()["profile"]["storage_usage"] == len(b"first") + len(b"second")
 
     current = client.get(f"/admin/profiles/{profile['id']}/persistent/current")
     assert current.status_code == 200
@@ -506,6 +506,104 @@ def test_admin_actions_write_audit_logs_with_request_context(client):
     assert any(entry["user_agent"] == "pytest-agent" for entry in logs)
 
 
+def test_admin_settings_default_from_origin_save_and_audit(client):
+    login(client, "admin@example.com")
+
+    defaults = client.get("/admin/settings", headers={"User-Agent": "pytest-agent"})
+
+    assert defaults.status_code == 200
+    assert defaults.json()["settings"] == {
+        "backend_api_url": "http://testserver",
+        "frontend_web_url": "http://testserver",
+        "profile_storage_limit_bytes": 10 * 1024 * 1024,
+        "max_active_profiles_per_account": 3,
+    }
+
+    saved = client.put(
+        "/admin/settings",
+        json={
+            "backend_api_url": "https://api.example.test/base/",
+            "frontend_web_url": "https://portal.example.test",
+            "profile_storage_limit_bytes": 12345,
+            "max_active_profiles_per_account": 7,
+        },
+        headers={"User-Agent": "settings-agent"},
+    )
+
+    assert saved.status_code == 200
+    assert saved.json()["settings"] == {
+        "backend_api_url": "https://api.example.test/base",
+        "frontend_web_url": "https://portal.example.test",
+        "profile_storage_limit_bytes": 12345,
+        "max_active_profiles_per_account": 7,
+    }
+    assert client.get("/admin/settings").json()["settings"]["backend_api_url"] == "https://api.example.test/base"
+
+    logs = client.get("/admin/audit-logs").json()["items"]
+    settings_log = next(entry for entry in logs if entry["action"] == "admin.settings.update")
+    assert settings_log["user_agent"] == "settings-agent"
+
+
+def test_admin_settings_reject_non_admin_and_invalid_values(client):
+    login(client)
+
+    assert client.get("/admin/settings").status_code == 403
+    assert client.put(
+        "/admin/settings",
+        json={
+            "backend_api_url": "https://api.example.test",
+            "frontend_web_url": "https://portal.example.test",
+            "profile_storage_limit_bytes": 1,
+            "max_active_profiles_per_account": 1,
+        },
+    ).status_code == 403
+
+    client.post("/logout")
+    login(client, "admin@example.com")
+    invalid = client.put(
+        "/admin/settings",
+        json={
+            "backend_api_url": "",
+            "frontend_web_url": "",
+            "profile_storage_limit_bytes": 0,
+            "max_active_profiles_per_account": 0,
+        },
+    )
+
+    assert invalid.status_code == 422
+
+
+def test_public_config_web_url_uses_saved_frontend_url_or_origin_fallback(client):
+    fallback = client.get("/v1/config/web-url")
+
+    assert fallback.status_code == 200
+    assert fallback.json() == {
+        "backend_api_url": "http://testserver",
+        "frontend_web_url": "http://testserver",
+        "profile_keys_url": "http://testserver/account/profile-keys",
+    }
+
+    login(client, "admin@example.com")
+    assert client.put(
+        "/admin/settings",
+        json={
+            "backend_api_url": "",
+            "frontend_web_url": "https://portal.example.test/",
+            "profile_storage_limit_bytes": 10 * 1024 * 1024,
+            "max_active_profiles_per_account": 3,
+        },
+    ).status_code == 200
+    client.post("/logout")
+
+    configured = client.get("/v1/config/web-url")
+    assert configured.status_code == 200
+    assert configured.json() == {
+        "backend_api_url": "http://testserver",
+        "frontend_web_url": "https://portal.example.test",
+        "profile_keys_url": "https://portal.example.test/account/profile-keys",
+    }
+
+
 def test_admin_delete_profile_key_removes_profile_and_writes_audit_log(client):
     profile = new_profile(client)
     client.post("/logout")
@@ -564,3 +662,78 @@ def test_admin_user_list_includes_profile_count_storage_last_upload_and_lock_sta
     assert normal["storage_usage"] == len(b"usage")
     assert normal["last_upload_at"] is not None
     assert normal["lock_status"] == "active"
+
+
+def test_profile_payload_storage_usage_totals_daily_backups_and_includes_limit(client):
+    profile = new_profile(client)
+    key = profile["profile_key"]
+    lease = acquire_lock(client, key)
+    base = datetime(2026, 1, 1, 10, 0, tzinfo=timezone.utc)
+
+    assert upload_persistent(client, key, lease, b"first", now=base).status_code == 201
+    assert upload_persistent(client, key, lease, b"second", now=base + timedelta(days=1)).status_code == 201
+
+    detail = client.get(f"/account/profiles/{profile['id']}")
+
+    assert detail.status_code == 200
+    assert detail.json()["profile"]["storage_usage"] == len(b"first") + len(b"second")
+    assert detail.json()["profile"]["storage_limit"] == 10 * 1024 * 1024
+
+
+def test_upload_storage_limit_uses_projected_daily_backup_usage(client):
+    profile = new_profile(client)
+    key = profile["profile_key"]
+    lease = acquire_lock(client, key)
+    base = datetime(2026, 1, 1, 10, 0, tzinfo=timezone.utc)
+
+    client.post("/logout")
+    login(client, "admin@example.com")
+    assert client.put(
+        "/admin/settings",
+        json={
+            "backend_api_url": "",
+            "frontend_web_url": "",
+            "profile_storage_limit_bytes": 8,
+            "max_active_profiles_per_account": 3,
+        },
+    ).status_code == 200
+    client.post("/logout")
+    login(client)
+
+    first = upload_persistent(client, key, lease, b"12345", now=base)
+    same_day_replacement = upload_persistent(client, key, lease, b"1234567", now=base + timedelta(hours=1))
+    exceeded = upload_persistent(client, key, lease, b"99", now=base + timedelta(days=1))
+
+    assert first.status_code == 201
+    assert same_day_replacement.status_code == 201
+    assert exceeded.status_code == 413
+    assert exceeded.json()["detail"]["code"] == "profile_storage_limit_exceeded"
+    assert client.get(f"/account/profiles/{profile['id']}").json()["profile"]["storage_usage"] == 7
+
+    with client.app.state.SessionLocal() as db:
+        versions = list(db.scalars(select(PersistentVersion).where(PersistentVersion.profile_id == profile["id"])))
+        backups = list(db.scalars(select(PersistentDailyBackup).where(PersistentDailyBackup.profile_id == profile["id"])))
+    assert len(versions) == 1
+    assert len(backups) == 1
+
+
+def test_profile_key_creation_respects_active_profile_limit(client):
+    login(client, "admin@example.com")
+    assert client.put(
+        "/admin/settings",
+        json={
+            "backend_api_url": "",
+            "frontend_web_url": "",
+            "profile_storage_limit_bytes": 10 * 1024 * 1024,
+            "max_active_profiles_per_account": 2,
+        },
+    ).status_code == 200
+    client.post("/logout")
+    login(client)
+
+    assert client.post("/account/profile-keys", json={"display_name": "One"}).status_code == 201
+    assert client.post("/account/profile-keys", json={"display_name": "Two"}).status_code == 201
+    blocked = client.post("/account/profile-keys", json={"display_name": "Three"})
+
+    assert blocked.status_code == 409
+    assert blocked.json()["detail"]["code"] == "active_profile_limit_exceeded"

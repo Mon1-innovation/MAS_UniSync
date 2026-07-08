@@ -121,8 +121,34 @@ def normalize_host(value):
     return raw or DEFAULT_HOST
 
 
-def api_base_url(host):
-    return "http://{0}:{1}".format(normalize_host(host), API_PORT)
+def normalize_api_url(value):
+    raw = (value or DEFAULT_HOST).strip().rstrip("/")
+    if not raw:
+        raw = DEFAULT_HOST
+    lowered = raw.lower()
+    if lowered.startswith("http://") or lowered.startswith("https://"):
+        if "/account/" in raw:
+            scheme, rest = raw.split("://", 1)
+            host = rest.split("/", 1)[0]
+            return "{0}://{1}".format(scheme, host).rstrip("/")
+        return raw
+    if raw.startswith("["):
+        end = raw.find("]")
+        if end >= 0:
+            host = raw[: end + 1]
+            rest = raw[end + 1:]
+            if rest.startswith(":"):
+                return "http://{0}{1}".format(host, rest)
+            return "http://{0}:{1}".format(host, API_PORT)
+    if "/" in raw:
+        raw = raw.split("/", 1)[0]
+    if ":" in raw:
+        return "http://{0}".format(raw)
+    return "http://{0}:{1}".format(raw, API_PORT)
+
+
+def api_base_url(api_url):
+    return normalize_api_url(api_url)
 
 
 def portal_base_url(host):

@@ -22,23 +22,29 @@ from .services import (
     backup_payload,
     cleanup_expired_locks,
     banned_exception,
+    active_profile_count_for_user,
     delete_profile_key as service_delete_profile_key,
     generate_profile_key,
     get_profile_by_key,
+    max_active_profiles_per_account,
     profile_payload,
+    profile_storage_limit_bytes,
     profile_storage_usage,
+    projected_profile_storage_usage,
     request_now,
     require_current_version,
     require_lock,
     restore_backup,
+    save_system_settings,
     store_upload,
+    system_settings_payload,
     upsert_flarum_user,
     user_payload,
     utc_now,
     user_storage_usage,
     version_payload,
 )
-from .schemas import BanRequest, LoginRequest, ProfileCreateRequest
+from .schemas import BanRequest, LoginRequest, ProfileCreateRequest, SystemSettingsRequest
 from .settings import Settings
 from .storage import LocalObjectStorage
 
@@ -86,12 +92,29 @@ def create_app(settings: Settings | None = None, flarum_client=None) -> FastAPI:
             raise HTTPException(status_code=404, detail={"code": "profile_not_found"})
         return profile
 
+    def profile_response_payload(db: Session, profile: Profile) -> dict:
+        return profile_payload(
+            profile,
+            profile_storage_usage(db, profile.id),
+            profile_storage_limit_bytes(db),
+        )
+
+    @app.get("/v1/config/web-url")
+    def get_public_web_url(request: Request, db: Session = Depends(get_db)):
+        settings_payload = system_settings_payload(db, request)
+        frontend_web_url = settings_payload["frontend_web_url"]
+        return {
+            "backend_api_url": settings_payload["backend_api_url"],
+            "frontend_web_url": frontend_web_url,
+            "profile_keys_url": frontend_web_url.rstrip("/") + "/account/profile-keys",
+        }
+
     @app.get("/account/profile-keys")
     def list_profile_keys(user: User = Depends(current_user), db: Session = Depends(get_db)):
         profiles = list(
             db.scalars(select(Profile).where(Profile.user_id == user.id).order_by(Profile.id))
         )
-        return {"items": [profile_payload(profile, profile_storage_usage(db, profile.id)) for profile in profiles]}
+        return {"items": [profile_response_payload(db, profile) for profile in profiles]}
 
     @app.post("/account/profile-keys", status_code=201)
     def create_profile_key(
@@ -100,6 +123,9 @@ def create_app(settings: Settings | None = None, flarum_client=None) -> FastAPI:
         user: User = Depends(current_user),
         db: Session = Depends(get_db),
     ):
+        active_count = active_profile_count_for_user(db, user.id)
+        if active_count >= max_active_profiles_per_account(db):
+            raise HTTPException(status_code=409, detail={"code": "active_profile_limit_exceeded"})
         profile = Profile(
             user_id=user.id,
             profile_key_plaintext=generate_profile_key(),
@@ -119,7 +145,7 @@ def create_app(settings: Settings | None = None, flarum_client=None) -> FastAPI:
             target_profile_key_id=profile.id,
         )
         db.commit()
-        return profile_payload(profile, profile_storage_usage(db, profile.id))
+        return profile_response_payload(db, profile)
 
     @app.post("/account/profile-keys/{profile_id}/refresh")
     def refresh_profile_key(
@@ -143,7 +169,7 @@ def create_app(settings: Settings | None = None, flarum_client=None) -> FastAPI:
             target_profile_key_id=profile.id,
         )
         db.commit()
-        return profile_payload(profile, profile_storage_usage(db, profile.id))
+        return profile_response_payload(db, profile)
 
     @app.delete("/account/profile-keys/{profile_id}", status_code=204)
     def delete_account_profile_key(
@@ -168,7 +194,7 @@ def create_app(settings: Settings | None = None, flarum_client=None) -> FastAPI:
     @app.get("/account/profiles/{profile_id}")
     def get_account_profile(profile_id: int, user: User = Depends(current_user), db: Session = Depends(get_db)):
         profile = owned_profile_or_404(db, profile_id, user)
-        return {"profile": profile_payload(profile, profile_storage_usage(db, profile.id))}
+        return {"profile": profile_response_payload(db, profile)}
 
     @app.get("/account/profiles/{profile_id}/persistent/current")
     def account_persistent_current(profile_id: int, user: User = Depends(current_user), db: Session = Depends(get_db)):
@@ -230,7 +256,7 @@ def create_app(settings: Settings | None = None, flarum_client=None) -> FastAPI:
         profile_key: str | None = Header(default=None, alias="X-MAS-Profile-Key"),
     ):
         profile = profile_from_header(request, db, profile_key)
-        return {"profile": profile_payload(profile, profile_storage_usage(db, profile.id))}
+        return {"profile": profile_response_payload(db, profile)}
 
     @app.post("/v1/locks/acquire")
     def acquire_lock(
@@ -315,6 +341,9 @@ def create_app(settings: Settings | None = None, flarum_client=None) -> FastAPI:
         profile = get_profile_by_key(db, profile_key, now)
         require_lock(db, profile.id, lease_token, now)
         data = await file.read()
+        projected_usage = projected_profile_storage_usage(db, profile.id, now.date(), len(data))
+        if projected_usage > profile_storage_limit_bytes(db):
+            raise HTTPException(status_code=413, detail={"code": "profile_storage_limit_exceeded"})
         version = store_upload(db, request.app.state.storage, profile, data, renpy_version, mas_version, now)
         db.commit()
         return version_payload(version)
@@ -389,6 +418,22 @@ def create_app(settings: Settings | None = None, flarum_client=None) -> FastAPI:
         users = list(db.scalars(select(User).order_by(User.id)))
         return {"items": [user_list_item(db, user, now) for user in users]}
 
+    @app.get("/admin/settings")
+    def admin_get_settings(request: Request, _: User = Depends(admin_user), db: Session = Depends(get_db)):
+        return {"settings": system_settings_payload(db, request)}
+
+    @app.put("/admin/settings")
+    def admin_update_settings(
+        payload: SystemSettingsRequest,
+        request: Request,
+        actor: User = Depends(admin_user),
+        db: Session = Depends(get_db),
+    ):
+        settings_payload = save_system_settings(db, request, payload)
+        audit(db, request, actor, "admin.settings.update")
+        db.commit()
+        return {"settings": settings_payload}
+
     @app.get("/admin/users/{user_id}")
     def admin_get_user(
         user_id: int,
@@ -404,7 +449,7 @@ def create_app(settings: Settings | None = None, flarum_client=None) -> FastAPI:
         db.commit()
         return {
             "user": user_payload(target),
-            "profiles": [profile_payload(profile, profile_storage_usage(db, profile.id)) for profile in profiles],
+            "profiles": [profile_response_payload(db, profile) for profile in profiles],
         }
 
     @app.get("/admin/profiles/{profile_id}")
@@ -412,7 +457,7 @@ def create_app(settings: Settings | None = None, flarum_client=None) -> FastAPI:
         profile = db.get(Profile, profile_id)
         if profile is None:
             raise HTTPException(status_code=404, detail={"code": "profile_not_found"})
-        return {"profile": profile_payload(profile, profile_storage_usage(db, profile.id))}
+        return {"profile": profile_response_payload(db, profile)}
 
     @app.get("/admin/profiles/{profile_id}/persistent/current")
     def admin_persistent_current(profile_id: int, _: User = Depends(admin_user), db: Session = Depends(get_db)):
@@ -566,7 +611,7 @@ def create_app(settings: Settings | None = None, flarum_client=None) -> FastAPI:
         profile.profile_key_plaintext = generate_profile_key()
         audit(db, request, actor, "admin.profile_key.refresh", target_user_id=profile.user_id, target_profile_id=profile.id, target_profile_key_id=profile.id)
         db.commit()
-        return profile_payload(profile, profile_storage_usage(db, profile.id))
+        return profile_response_payload(db, profile)
 
     @app.delete("/admin/profile-keys/{key_id}", status_code=204)
     def admin_delete_key(key_id: int, request: Request, actor: User = Depends(admin_user), db: Session = Depends(get_db)):

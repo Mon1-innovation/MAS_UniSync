@@ -18,6 +18,7 @@ import {EmptyState} from '../components/EmptyState'
 import {ErrorBanner} from '../components/ErrorBanner'
 import {LoadingState} from '../components/LoadingState'
 import {RelativeTime} from '../components/RelativeTime'
+import {StorageUsageBar} from '../components/StorageUsageBar'
 import {StatusLabel} from '../components/StatusLabel'
 
 export function ProfileDetailPage() {
@@ -120,6 +121,7 @@ export function ProfileDetailPage() {
             <Box className="info-grid" sx={{mt: 3}}>
               <Info label="Profile file size" value={<ByteSize value={profile.storage_usage} />} />
             </Box>
+            <StorageUsageBar usage={profile.storage_usage} limit={profile.storage_limit} />
           </Box>
 
           <Box className="panel">

@@ -93,6 +93,66 @@ def test_sync_session_acquires_lock_uploads_and_releases(tmp_path):
     assert session.status.last_upload_at == "2026-01-01T00:00:00Z"
 
 
+def test_sync_session_uses_complete_api_url_without_adding_fixed_port(tmp_path):
+    sync = load_client_module("mas_unisync_sync")
+    persistent = tmp_path / "persistent"
+    persistent.write_bytes(b"local")
+    requests = []
+
+    def fake_urlopen(request, timeout):
+        requests.append(request)
+        if request.full_url.endswith("/v1/profile/resolve"):
+            return FakeResponse(200, {"profile": {"id": 7}})
+        if request.full_url.endswith("/v1/locks/acquire"):
+            return FakeResponse(200, {"lease_token": "lease_123"})
+        if request.full_url.endswith("/v1/persistent/current"):
+            raise HTTPError(
+                request.full_url,
+                404,
+                "Not Found",
+                hdrs=None,
+                fp=FakeResponse(404, {"detail": {"code": "no_current_persistent"}}),
+            )
+        raise AssertionError(f"unexpected URL {request.full_url}")
+
+    session = sync.SyncSession(
+        "https://api.example.test:9443/mas-api/",
+        "maspk_test",
+        str(persistent),
+        str(tmp_path / "backups"),
+        urlopen=fake_urlopen,
+    )
+    session.start()
+
+    assert [request.full_url for request in requests] == [
+        "https://api.example.test:9443/mas-api/v1/profile/resolve",
+        "https://api.example.test:9443/mas-api/v1/locks/acquire",
+        "https://api.example.test:9443/mas-api/v1/persistent/current",
+    ]
+
+
+def test_fetch_profile_keys_url_requests_public_config_from_api_url():
+    sync = load_client_module("mas_unisync_sync")
+    requests = []
+
+    def fake_urlopen(request, timeout):
+        requests.append(request)
+        if request.full_url == "https://api.example.test/root/v1/config/web-url":
+            return FakeResponse(
+                200,
+                {
+                    "frontend_web_url": "https://portal.example.test",
+                    "profile_keys_url": "https://portal.example.test/account/profile-keys",
+                },
+            )
+        raise AssertionError(f"unexpected URL {request.full_url}")
+
+    result = sync.fetch_profile_keys_url("https://api.example.test/root/", urlopen=fake_urlopen)
+
+    assert result == "https://portal.example.test/account/profile-keys"
+    assert len(requests) == 1
+
+
 def test_start_can_upload_local_persistent_when_remote_has_no_current_file(tmp_path):
     sync = load_client_module("mas_unisync_sync")
     persistent = tmp_path / "persistent"

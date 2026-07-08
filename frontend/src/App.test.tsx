@@ -43,6 +43,10 @@ function blob(data: string) {
   })
 }
 
+function expectFetchCalled(path: string, options: Partial<RequestInit> = {}) {
+  expect(fetch).toHaveBeenCalledWith(path, expect.objectContaining({credentials: 'include', ...options}))
+}
+
 describe('App', () => {
   beforeEach(() => {
     localStorage.clear()
@@ -182,6 +186,64 @@ describe('App', () => {
     expect(submittedBody).toEqual({display_name: 'Laptop'})
   })
 
+  it('shows a specific error when profile key creation reaches the account limit', async () => {
+    localStorage.setItem('mas_unisync_user', JSON.stringify(normalUser))
+    mockFetch(async (input, init) => {
+      if (input === '/account/profile-keys' && !init?.method) {
+        return json({items: []})
+      }
+      if (input === '/v1/config/web-url') {
+        return json({
+          backend_api_url: 'https://api.example.test',
+          frontend_web_url: 'https://portal.example.test',
+          profile_keys_url: 'https://portal.example.test/account/profile-keys',
+        })
+      }
+      if (input === '/account/profile-keys' && init?.method === 'POST') {
+        return json({detail: {code: 'active_profile_limit_exceeded'}}, {status: 409})
+      }
+      return json({detail: {code: 'not_found'}}, {status: 404})
+    })
+
+    render(
+      <MemoryRouter initialEntries={['/account/profile-keys']}>
+        <App />
+      </MemoryRouter>,
+    )
+
+    await userEvent.click(await screen.findByRole('button', {name: /new profile key/i}))
+    await userEvent.type(screen.getByLabelText(/display name/i), 'Laptop')
+    await userEvent.click(screen.getByRole('button', {name: /create key/i}))
+
+    await expect(screen.findByText('已达到当前账户可用 profile 数量上限')).resolves.toBeInTheDocument()
+  })
+
+  it('shows the configured backend API URL on the profile keys page', async () => {
+    localStorage.setItem('mas_unisync_user', JSON.stringify(normalUser))
+    mockFetch((input) => {
+      if (input === '/account/profile-keys') {
+        return json({items: []})
+      }
+      if (input === '/v1/config/web-url') {
+        return json({
+          backend_api_url: 'https://api.example.test',
+          frontend_web_url: 'https://portal.example.test',
+          profile_keys_url: 'https://portal.example.test/account/profile-keys',
+        })
+      }
+      return json({detail: {code: 'not_found'}}, {status: 404})
+    })
+
+    render(
+      <MemoryRouter initialEntries={['/account/profile-keys']}>
+        <App />
+      </MemoryRouter>,
+    )
+
+    await expect(screen.findByText('Backend API URL')).resolves.toBeInTheDocument()
+    expect(screen.getByText('https://api.example.test')).toBeInTheDocument()
+  })
+
   it('renders access denied when the admin API returns 403', async () => {
     localStorage.setItem('mas_unisync_user', JSON.stringify(adminUser))
     mockFetch((input) => {
@@ -245,7 +307,7 @@ describe('App', () => {
 
     await userEvent.click(link)
     await waitFor(() => {
-      expect(fetch).toHaveBeenCalledWith('/admin/profiles/11', {credentials: 'include', headers: {}})
+      expectFetchCalled('/admin/profiles/11')
     })
   })
 
@@ -325,7 +387,7 @@ describe('App', () => {
 
     await waitFor(() => expect(screen.queryByText('Main')).not.toBeInTheDocument())
     expect(screen.getByText('No profile keys')).toBeInTheDocument()
-    expect(fetch).toHaveBeenCalledWith('/account/profile-keys/9', {credentials: 'include', headers: {}, method: 'DELETE'})
+    expectFetchCalled('/account/profile-keys/9', {method: 'DELETE'})
   })
 
   it('allows revoked profile keys to be deleted from the account page', async () => {
@@ -365,7 +427,7 @@ describe('App', () => {
     await userEvent.click(await screen.findByRole('button', {name: /^delete$/i}))
 
     await waitFor(() => expect(screen.queryByText('Old key')).not.toBeInTheDocument())
-    expect(fetch).toHaveBeenCalledWith('/account/profile-keys/9', {credentials: 'include', headers: {}, method: 'DELETE'})
+    expectFetchCalled('/account/profile-keys/9', {method: 'DELETE'})
   })
 
   it('shows an error when account profile key deletion fails', async () => {
@@ -453,7 +515,7 @@ describe('App', () => {
     await userEvent.click(await screen.findByRole('button', {name: /^delete this key$/i}))
 
     await expect(screen.findAllByText('Player')).resolves.not.toHaveLength(0)
-    expect(fetch).toHaveBeenCalledWith('/admin/profile-keys/9', {credentials: 'include', headers: {}, method: 'DELETE'})
+    expectFetchCalled('/admin/profile-keys/9', {method: 'DELETE'})
   })
 
   it('shows an error when admin profile key deletion fails', async () => {
@@ -549,7 +611,7 @@ describe('App', () => {
     await userEvent.click(await screen.findByRole('button', {name: /^delete this key$/i}))
 
     await expect(screen.findAllByText('Player')).resolves.not.toHaveLength(0)
-    expect(fetch).toHaveBeenCalledWith('/admin/profile-keys/9', {credentials: 'include', headers: {}, method: 'DELETE'})
+    expectFetchCalled('/admin/profile-keys/9', {method: 'DELETE'})
   })
 
   it('shows current persistent metadata and lists backups directly on the admin profile page', async () => {
@@ -573,6 +635,7 @@ describe('App', () => {
       last_upload_at: '2026-07-07T09:00:00',
       created_at: '2026-07-07T08:00:00',
       storage_usage: 12,
+      storage_limit: 24,
     }
     mockFetch((input, init) => {
       if (input === '/account/profile-keys') {
@@ -637,6 +700,7 @@ describe('App', () => {
 
     await expect(screen.findByRole('heading', {level: 1, name: 'Main'})).resolves.toBeInTheDocument()
     expect(screen.getByText('Profile file size')).toBeInTheDocument()
+    expect(screen.getByRole('progressbar', {name: /storage usage/i})).toHaveAttribute('aria-valuenow', '50')
     expect(screen.getByText('Current persistent')).toBeInTheDocument()
     expect(screen.getByText(/version #22/i)).toBeInTheDocument()
     expect(screen.getAllByText('12 B').length).toBeGreaterThanOrEqual(1)
@@ -649,15 +713,11 @@ describe('App', () => {
     await userEvent.click(screen.getByRole('button', {name: /download backup 2026-07-07/i}))
     await userEvent.click(screen.getByRole('button', {name: /restore backup 2026-07-07/i}))
 
-    expect(fetch).toHaveBeenCalledWith('/admin/profiles/9/persistent/current', {credentials: 'include', headers: {}})
-    expect(fetch).toHaveBeenCalledWith('/admin/profiles/9/persistent/current/download', {credentials: 'include'})
-    expect(fetch).toHaveBeenCalledWith('/admin/profiles/9/persistent/backups', {credentials: 'include', headers: {}})
-    expect(fetch).toHaveBeenCalledWith('/admin/profiles/9/persistent/backups/5/download', {credentials: 'include'})
-    expect(fetch).toHaveBeenCalledWith('/admin/profiles/9/persistent/backups/5/restore', {
-      credentials: 'include',
-      headers: {},
-      method: 'POST',
-    })
+    expectFetchCalled('/admin/profiles/9/persistent/current')
+    expectFetchCalled('/admin/profiles/9/persistent/current/download')
+    expectFetchCalled('/admin/profiles/9/persistent/backups')
+    expectFetchCalled('/admin/profiles/9/persistent/backups/5/download')
+    expectFetchCalled('/admin/profiles/9/persistent/backups/5/restore', {method: 'POST'})
   })
 
   it('shows an empty current persistent state on the admin profile page', async () => {
@@ -727,6 +787,7 @@ describe('App', () => {
               last_upload_at: '2026-07-07T09:00:00',
               created_at: '2026-07-07T08:00:00',
               storage_usage: 12,
+              storage_limit: 24,
             },
           ],
         })
@@ -743,6 +804,7 @@ describe('App', () => {
             last_upload_at: '2026-07-07T09:00:00',
             created_at: '2026-07-07T08:00:00',
             storage_usage: 12,
+            storage_limit: 24,
           },
         })
       }
@@ -795,6 +857,8 @@ describe('App', () => {
 
     await expect(screen.findByRole('heading', {level: 1, name: 'Main'})).resolves.toBeInTheDocument()
     expect(screen.getByText('Profile file size')).toBeInTheDocument()
+    expect(screen.getByRole('progressbar', {name: /storage usage/i})).toHaveAttribute('aria-valuenow', '50')
+    expect(screen.getByText((_content, element) => element?.textContent === '12 B / 24 B')).toBeInTheDocument()
     expect(screen.getAllByText('12 B').length).toBeGreaterThanOrEqual(1)
     expect(screen.getAllByText('sha-current').length).toBeGreaterThanOrEqual(1)
     expect(screen.getByText('2026-07-07')).toBeInTheDocument()
@@ -802,8 +866,8 @@ describe('App', () => {
     await userEvent.click(screen.getByRole('button', {name: /download current/i}))
     await userEvent.click(screen.getByRole('button', {name: /download backup 2026-07-07/i}))
 
-    expect(fetch).toHaveBeenCalledWith('/account/profiles/9/persistent/current/download', {credentials: 'include'})
-    expect(fetch).toHaveBeenCalledWith('/account/profiles/9/persistent/backups/5/download', {credentials: 'include'})
+    expectFetchCalled('/account/profiles/9/persistent/current/download')
+    expectFetchCalled('/account/profiles/9/persistent/backups/5/download')
   })
 
   it('shows an empty current file state for profiles without persistent uploads', async () => {
@@ -904,5 +968,60 @@ describe('App', () => {
 
     const link = await screen.findByRole('link', {name: '#42'})
     expect(link).toHaveAttribute('href', '/admin/profiles/42')
+  })
+
+  it('allows admins to edit runtime system settings', async () => {
+    localStorage.setItem('mas_unisync_user', JSON.stringify(adminUser))
+    let submittedBody: unknown
+    mockFetch((input, init) => {
+      if (input === '/account/profile-keys') {
+        return json({items: []})
+      }
+      if (input === '/admin/settings' && !init?.method) {
+        return json({
+          settings: {
+            backend_api_url: 'https://api.example.test',
+            frontend_web_url: 'https://portal.example.test',
+            profile_storage_limit_bytes: 10485760,
+            max_active_profiles_per_account: 3,
+          },
+        })
+      }
+      if (input === '/admin/settings' && init?.method === 'PUT') {
+        submittedBody = JSON.parse(String(init.body))
+        return json({
+          settings: {
+            backend_api_url: 'https://api2.example.test',
+            frontend_web_url: 'https://portal.example.test',
+            profile_storage_limit_bytes: 20971520,
+            max_active_profiles_per_account: 4,
+          },
+        })
+      }
+      return json({detail: {code: 'not_found'}}, {status: 404})
+    })
+
+    render(
+      <MemoryRouter initialEntries={['/admin/settings']}>
+        <App />
+      </MemoryRouter>,
+    )
+
+    await expect(screen.findByRole('heading', {level: 1, name: /settings/i})).resolves.toBeInTheDocument()
+    await userEvent.clear(screen.getByLabelText(/backend api url/i))
+    await userEvent.type(screen.getByLabelText(/backend api url/i), 'https://api2.example.test')
+    await userEvent.clear(screen.getByLabelText(/profile storage limit/i))
+    await userEvent.type(screen.getByLabelText(/profile storage limit/i), '20971520')
+    await userEvent.clear(screen.getByLabelText(/max active profiles/i))
+    await userEvent.type(screen.getByLabelText(/max active profiles/i), '4')
+    await userEvent.click(screen.getByRole('button', {name: /save settings/i}))
+
+    await expect(screen.findByText(/settings saved/i)).resolves.toBeInTheDocument()
+    expect(submittedBody).toEqual({
+      backend_api_url: 'https://api2.example.test',
+      frontend_web_url: 'https://portal.example.test',
+      profile_storage_limit_bytes: 20971520,
+      max_active_profiles_per_account: 4,
+    })
   })
 })

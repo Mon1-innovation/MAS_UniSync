@@ -15,15 +15,15 @@ except (ImportError, ValueError):
 
 
 class SyncSession(object):
-    def __init__(self, host, profile_key, persistent_path, backup_dir, renpy_version=None, mas_version=None, urlopen=None):
-        self.host = core.normalize_host(host)
+    def __init__(self, api_url, profile_key, persistent_path, backup_dir, renpy_version=None, mas_version=None, urlopen=None):
+        self.api_base = core.api_base_url(api_url)
+        self.host = core.normalize_host(api_url)
         self.profile_key = profile_key
         self.persistent_path = persistent_path
         self.backup_dir = backup_dir
         self.renpy_version = renpy_version
         self.mas_version = mas_version
         self.urlopen = urlopen
-        self.api_base = core.api_base_url(self.host)
         self.status = core.SyncStatus()
         self.status.enabled = bool(profile_key)
 
@@ -157,3 +157,16 @@ class SyncSession(object):
         uploaded_at = payload.get("created_at") if isinstance(payload, dict) else None
         self.status.mark_upload_success(uploaded_hash, uploaded_at)
         return payload
+
+
+def fetch_profile_keys_url(api_url, urlopen=None):
+    payload = http.request_json(
+        "GET",
+        core.build_url(core.api_base_url(api_url), "/v1/config/web-url"),
+        urlopen=urlopen,
+    )
+    if isinstance(payload, dict):
+        profile_keys_url = payload.get("profile_keys_url")
+        if profile_keys_url:
+            return profile_keys_url
+    raise core.UniSyncError("web-url config response did not include profile_keys_url")

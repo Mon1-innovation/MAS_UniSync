@@ -1,5 +1,17 @@
 import {downloadBlob, request} from './client'
-import type {AdminUserListItem, AuditLog, Backup, ListResponse, Profile, ProfileResponse, StatusResponse, UserResponse, Version} from './types'
+import type {
+  AdminUserListItem,
+  AuditLog,
+  Backup,
+  ListResponse,
+  Profile,
+  ProfileResponse,
+  StatusResponse,
+  SystemSettings,
+  SystemSettingsResponse,
+  UserResponse,
+  Version,
+} from './types'
 
 export function listAdminUsers() {
   return request<ListResponse<AdminUserListItem>>('/admin/users')
@@ -80,4 +92,15 @@ export function downloadBackupPersistent(profileId: number, backupId: number) {
 
 export function listAuditLogs() {
   return request<ListResponse<AuditLog>>('/admin/audit-logs')
+}
+
+export function getAdminSettings() {
+  return request<SystemSettingsResponse>('/admin/settings')
+}
+
+export function updateAdminSettings(settings: SystemSettings) {
+  return request<SystemSettingsResponse>('/admin/settings', {
+    method: 'PUT',
+    body: {...settings},
+  })
 }

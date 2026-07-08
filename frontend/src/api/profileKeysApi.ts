@@ -1,8 +1,12 @@
 import {downloadBlob, request} from './client'
-import type {Backup, ListResponse, Profile, ProfileResponse, Version} from './types'
+import type {Backup, ListResponse, Profile, ProfileResponse, PublicWebConfig, Version} from './types'
 
 export function listProfileKeys() {
   return request<ListResponse<Profile>>('/account/profile-keys')
+}
+
+export function getPublicWebConfig() {
+  return request<PublicWebConfig>('/v1/config/web-url')
 }
 
 export function createProfileKey(displayName: string | null) {

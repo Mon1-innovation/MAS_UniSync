@@ -9,6 +9,7 @@ import {ProfileDetailPage} from './pages/ProfileDetailPage'
 import {ProfileKeysPage} from './pages/ProfileKeysPage'
 import {AdminAuditLogsPage} from './pages/admin/AdminAuditLogsPage'
 import {AdminProfileDetailPage} from './pages/admin/AdminProfileDetailPage'
+import {AdminSettingsPage} from './pages/admin/AdminSettingsPage'
 import {AdminUserDetailPage} from './pages/admin/AdminUserDetailPage'
 import {AdminUsersPage} from './pages/admin/AdminUsersPage'
 import './styles/github.css'
@@ -85,6 +86,17 @@ export function App() {
                 </RequireAdmin>
               }
             />
+            <Route
+              path="/admin/settings"
+              element={
+                <RequireAdmin>
+                  <AppShell>
+                    <AdminNav />
+                    <AdminSettingsPage />
+                  </AppShell>
+                </RequireAdmin>
+              }
+            />
             <Route path="*" element={<Navigate to="/" replace />} />
           </Routes>
         </AuthProvider>
@@ -101,6 +113,9 @@ function AdminNav() {
       </NavLink>
       <NavLink to="/admin/audit-logs" className={({isActive}) => (isActive ? 'is-active' : undefined)}>
         Audit logs
+      </NavLink>
+      <NavLink to="/admin/settings" className={({isActive}) => (isActive ? 'is-active' : undefined)}>
+        Settings
       </NavLink>
     </nav>
   )

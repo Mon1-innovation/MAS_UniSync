@@ -17,6 +17,7 @@ from .models import (
     PersistentDailyBackup,
     PersistentVersion,
     Profile,
+    SystemSetting,
     User,
 )
 from .settings import Settings
@@ -54,6 +55,14 @@ def generate_profile_key() -> str:
     return "maspk_" + secrets.token_urlsafe(32)
 
 
+DEFAULT_PROFILE_STORAGE_LIMIT_BYTES = 10 * 1024 * 1024
+DEFAULT_MAX_ACTIVE_PROFILES_PER_ACCOUNT = 3
+SETTING_BACKEND_API_URL = "backend_api_url"
+SETTING_FRONTEND_WEB_URL = "frontend_web_url"
+SETTING_PROFILE_STORAGE_LIMIT_BYTES = "profile_storage_limit_bytes"
+SETTING_MAX_ACTIVE_PROFILES_PER_ACCOUNT = "max_active_profiles_per_account"
+
+
 def sanitize_version(value: str | None) -> str | None:
     """Strip Python object reprs (e.g. '<function version at 0x...>') sent by buggy clients."""
     if value is None:
@@ -76,13 +85,14 @@ def user_payload(user: User) -> dict:
     }
 
 
-def profile_payload(profile: Profile, storage_usage: int = 0) -> dict:
+def profile_payload(profile: Profile, storage_usage: int = 0, storage_limit: int = DEFAULT_PROFILE_STORAGE_LIMIT_BYTES) -> dict:
     return {
         "id": profile.id,
         "user_id": profile.user_id,
         "display_name": profile.display_name,
         "profile_key": profile.profile_key_plaintext,
         "storage_usage": storage_usage,
+        "storage_limit": storage_limit,
         "revoked_at": iso(profile.revoked_at),
         "last_used_at": iso(profile.last_used_at),
         "last_upload_at": iso(profile.last_upload_at),
@@ -156,6 +166,72 @@ def audit(
             created_at=request_now(request),
         )
     )
+
+
+def request_origin(request: Request) -> str:
+    return str(request.base_url).rstrip("/")
+
+
+def normalize_url_setting(value: str | None) -> str:
+    return (value or "").strip().rstrip("/")
+
+
+def read_system_setting(db: Session, key: str) -> str | None:
+    setting = db.get(SystemSetting, key)
+    return setting.value if setting else None
+
+
+def write_system_setting(db: Session, key: str, value: str, now: datetime) -> None:
+    setting = db.get(SystemSetting, key)
+    if setting is None:
+        db.add(SystemSetting(key=key, value=value, updated_at=now))
+    else:
+        setting.value = value
+        setting.updated_at = now
+
+
+def profile_storage_limit_bytes(db: Session) -> int:
+    raw = read_system_setting(db, SETTING_PROFILE_STORAGE_LIMIT_BYTES)
+    if raw is None or raw == "":
+        return DEFAULT_PROFILE_STORAGE_LIMIT_BYTES
+    try:
+        value = int(raw)
+    except ValueError:
+        return DEFAULT_PROFILE_STORAGE_LIMIT_BYTES
+    return value if value > 0 else DEFAULT_PROFILE_STORAGE_LIMIT_BYTES
+
+
+def max_active_profiles_per_account(db: Session) -> int:
+    raw = read_system_setting(db, SETTING_MAX_ACTIVE_PROFILES_PER_ACCOUNT)
+    if raw is None or raw == "":
+        return DEFAULT_MAX_ACTIVE_PROFILES_PER_ACCOUNT
+    try:
+        value = int(raw)
+    except ValueError:
+        return DEFAULT_MAX_ACTIVE_PROFILES_PER_ACCOUNT
+    return value if value > 0 else DEFAULT_MAX_ACTIVE_PROFILES_PER_ACCOUNT
+
+
+def system_settings_payload(db: Session, request: Request) -> dict:
+    origin = request_origin(request)
+    backend_api_url = normalize_url_setting(read_system_setting(db, SETTING_BACKEND_API_URL))
+    frontend_web_url = normalize_url_setting(read_system_setting(db, SETTING_FRONTEND_WEB_URL))
+    return {
+        "backend_api_url": backend_api_url or origin,
+        "frontend_web_url": frontend_web_url or origin,
+        "profile_storage_limit_bytes": profile_storage_limit_bytes(db),
+        "max_active_profiles_per_account": max_active_profiles_per_account(db),
+    }
+
+
+def save_system_settings(db: Session, request: Request, payload) -> dict:
+    now = request_now(request)
+    write_system_setting(db, SETTING_BACKEND_API_URL, normalize_url_setting(payload.backend_api_url), now)
+    write_system_setting(db, SETTING_FRONTEND_WEB_URL, normalize_url_setting(payload.frontend_web_url), now)
+    write_system_setting(db, SETTING_PROFILE_STORAGE_LIMIT_BYTES, str(payload.profile_storage_limit_bytes), now)
+    write_system_setting(db, SETTING_MAX_ACTIVE_PROFILES_PER_ACCOUNT, str(payload.max_active_profiles_per_account), now)
+    db.flush()
+    return system_settings_payload(db, request)
 
 
 def active_ban(db: Session, target_type: str, target_id: int, now: datetime) -> Ban | None:
@@ -239,6 +315,27 @@ def require_lock(db: Session, profile_id: int, lease_token: str | None, now: dat
     if lock is None or lock.lease_token != lease_token:
         raise HTTPException(status_code=409, detail={"code": "invalid_lease"})
     return lock
+
+
+def active_profile_count_for_user(db: Session, user_id: int) -> int:
+    return db.scalar(
+        select(func.count(Profile.id)).where(Profile.user_id == user_id, Profile.revoked_at.is_(None))
+    ) or 0
+
+
+def projected_profile_storage_usage(db: Session, profile_id: int, backup_date: date, incoming_size: int) -> int:
+    current_usage = profile_storage_usage(db, profile_id)
+    backup = db.scalar(
+        select(PersistentDailyBackup).where(
+            PersistentDailyBackup.profile_id == profile_id,
+            PersistentDailyBackup.backup_date == backup_date,
+        )
+    )
+    replaced_size = 0
+    if backup is not None:
+        version = db.get(PersistentVersion, backup.version_id)
+        replaced_size = version.size if version else 0
+    return current_usage - replaced_size + incoming_size
 
 
 def store_upload(
@@ -377,8 +474,12 @@ def delete_profile_key(
 
 
 def profile_storage_usage(db: Session, profile_id: int) -> int:
-    current = current_version(db, profile_id)
-    return current.size if current else 0
+    return db.scalar(
+        select(func.coalesce(func.sum(PersistentVersion.size), 0))
+        .select_from(PersistentDailyBackup)
+        .join(PersistentVersion, PersistentVersion.id == PersistentDailyBackup.version_id)
+        .where(PersistentDailyBackup.profile_id == profile_id)
+    ) or 0
 
 
 def user_storage_usage(db: Session, user_id: int) -> int:

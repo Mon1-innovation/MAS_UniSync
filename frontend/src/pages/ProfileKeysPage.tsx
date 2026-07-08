@@ -2,7 +2,8 @@ import {Box, Button, Text} from '@primer/react'
 import {FileDirectoryIcon, KeyIcon, PlusIcon, SyncIcon, TrashIcon} from '@primer/octicons-react'
 import {useEffect, useMemo, useState} from 'react'
 import {Link} from 'react-router-dom'
-import {createProfileKey, deleteProfileKey, listProfileKeys, refreshProfileKey} from '../api/profileKeysApi'
+import {ApiError} from '../api/client'
+import {createProfileKey, deleteProfileKey, getPublicWebConfig, listProfileKeys, refreshProfileKey} from '../api/profileKeysApi'
 import type {Profile} from '../api/types'
 import {ConfirmDialog} from '../components/ConfirmDialog'
 import {CopyableSecret} from '../components/CopyableSecret'
@@ -21,6 +22,7 @@ export function ProfileKeysPage() {
   const [error, setError] = useState<string | null>(null)
   const [isCreateOpen, setIsCreateOpen] = useState(false)
   const [createName, setCreateName] = useState('')
+  const [backendApiUrl, setBackendApiUrl] = useState('')
   const [pendingAction, setPendingAction] = useState<PendingAction>(null)
   const [isBusy, setIsBusy] = useState(false)
 
@@ -29,21 +31,28 @@ export function ProfileKeysPage() {
     listProfileKeys()
       .then((response) => {
         if (!cancelled) {
-          console.log('[ProfileKeysPage] API response:', response)
-          console.log('[ProfileKeysPage] response.items:', response?.items)
-          console.log('[ProfileKeysPage] Array.isArray(items):', Array.isArray(response?.items))
           setProfiles(Array.isArray(response.items) ? response.items : [])
         }
       })
       .catch((err) => {
         if (!cancelled) {
-          console.log('[ProfileKeysPage] API error:', err)
           setError('Could not load profile keys.')
         }
       })
       .finally(() => {
         if (!cancelled) {
           setIsLoading(false)
+        }
+      })
+    getPublicWebConfig()
+      .then((config) => {
+        if (!cancelled) {
+          setBackendApiUrl(config.backend_api_url)
+        }
+      })
+      .catch(() => {
+        if (!cancelled) {
+          setBackendApiUrl('')
         }
       })
     return () => {
@@ -69,6 +78,13 @@ export function ProfileKeysPage() {
       setProfiles((current) => [...current, profile])
       setCreateName('')
       setIsCreateOpen(false)
+      setError(null)
+    } catch (error) {
+      if (error instanceof ApiError && error.code === 'active_profile_limit_exceeded') {
+        setError('已达到当前账户可用 profile 数量上限')
+      } else {
+        setError('Could not create this profile key.')
+      }
     } finally {
       setIsBusy(false)
     }
@@ -111,6 +127,15 @@ export function ProfileKeysPage() {
       {error ? <ErrorBanner message={error} /> : null}
       {isLoading ? <LoadingState /> : null}
       {!isLoading && sortedProfiles.length === 0 ? <EmptyState title="No profile keys" message="Create a key before configuring the submod." /> : null}
+
+      {backendApiUrl ? (
+        <Box className="panel compact-panel">
+          <Text as="h2" sx={{fontSize: 2, mt: 0}}>
+            Backend API URL
+          </Text>
+          <CopyableSecret value={backendApiUrl} copyLabel="Copy backend API URL" />
+        </Box>
+      ) : null}
 
       <Box className="panel-list">
         {sortedProfiles.map((profile) => (

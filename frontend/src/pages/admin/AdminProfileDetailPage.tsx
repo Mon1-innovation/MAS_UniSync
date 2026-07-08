@@ -27,6 +27,7 @@ import {EmptyState} from '../../components/EmptyState'
 import {ErrorBanner} from '../../components/ErrorBanner'
 import {LoadingState} from '../../components/LoadingState'
 import {RelativeTime} from '../../components/RelativeTime'
+import {StorageUsageBar} from '../../components/StorageUsageBar'
 import {StatusLabel} from '../../components/StatusLabel'
 
 type PendingAction = 'banProfile' | 'unbanProfile' | 'banKey' | 'unbanKey' | 'refreshKey' | 'deleteKey' | 'releaseLock' | null
@@ -159,6 +160,7 @@ export function AdminProfileDetailPage() {
                 </strong>
               </Box>
             </Box>
+            <StorageUsageBar usage={profile.storage_usage} limit={profile.storage_limit} />
           </Box>
           <Box className="panel">
             <Box className="section-heading">

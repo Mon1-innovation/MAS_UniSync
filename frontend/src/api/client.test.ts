@@ -26,7 +26,8 @@ describe('api request', () => {
     expect(fetch).toHaveBeenCalledWith('/account/profile-keys', {
       method: 'POST',
       credentials: 'include',
-      headers: {'Content-Type': 'application/json'},
+      cache: 'no-store',
+      headers: {'Content-Type': 'application/json', 'Cache-Control': 'no-cache'},
       body: JSON.stringify({display_name: 'Main'}),
     })
   })

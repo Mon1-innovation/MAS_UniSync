@@ -37,12 +37,15 @@ init -989 python:
         "last_error": "",
     }
 
-    def mas_unisync_get_host():
+    def mas_unisync_get_api_url():
         try:
             value = store.mas_getAPIKey(mas_unisync_core.HOST_FEATURE)
         except Exception:
             value = ""
-        return mas_unisync_core.normalize_host(value)
+        return mas_unisync_core.normalize_api_url(value)
+
+    def mas_unisync_get_host():
+        return mas_unisync_get_api_url()
 
     def mas_unisync_get_profile_key():
         try:
@@ -64,10 +67,13 @@ init -989 python:
         except Exception:
             store.mas_api_keys.save_keys()
 
-    def mas_unisync_save_host(host):
-        cleaned = mas_unisync_core.normalize_host(host)
+    def mas_unisync_save_api_url(api_url):
+        cleaned = mas_unisync_core.normalize_api_url(api_url)
         mas_unisync_save_key(mas_unisync_core.HOST_FEATURE, cleaned)
         return cleaned
+
+    def mas_unisync_save_host(host):
+        return mas_unisync_save_api_url(host)
 
     def mas_unisync_clipboard_text():
         try:
@@ -88,8 +94,8 @@ init -989 python:
         if not value:
             renpy.notify(_("Clipboard is empty"))
             return
-        mas_unisync_save_host(value)
-        renpy.notify(_("MAS UniSync host saved"))
+        mas_unisync_save_api_url(value)
+        renpy.notify(_("MAS UniSync API URL saved"))
         renpy.restart_interaction()
 
     def mas_unisync_paste_profile_key():
@@ -125,7 +131,7 @@ init -989 python:
         renpy.restart_interaction()
 
     def mas_unisync_open_profile_keys():
-        webbrowser.open_new(mas_unisync_core.portal_profile_keys_url(mas_unisync_get_host()))
+        webbrowser.open_new(mas_unisync_sync.fetch_profile_keys_url(mas_unisync_get_api_url()))
 
     def mas_unisync_update_status(status_obj=None, message=None):
         global mas_unisync_status
@@ -151,13 +157,13 @@ init -989 python:
             return False, str(exc)
 
     def mas_unisync_host_on_change(host):
-        mas_unisync_save_host(host)
+        mas_unisync_save_api_url(host)
         return True, ""
 
 init -969 python:
     store.mas_registerAPIKey(
         mas_unisync_core.HOST_FEATURE,
-        _("MAS UniSync Host"),
+        _("MAS UniSync API URL"),
         mas_unisync_host_on_change
     )
     store.mas_registerAPIKey(
@@ -169,11 +175,10 @@ init -969 python:
 screen mas_unisync_settingpane():
     python:
         _status = mas_unisync_status if isinstance(mas_unisync_status, dict) else {}
-        _host = mas_unisync_get_host()
+        _api_url = mas_unisync_get_api_url()
         _key = mas_unisync_get_profile_key()
         _masked_key = _key[:12] + "..." if len(_key) > 15 else _key
-        _display_host = mas_unisync_core.renpy_display_text(_host)
-        _display_api = mas_unisync_core.renpy_display_text(mas_unisync_core.api_base_url(_host))
+        _display_api = mas_unisync_core.renpy_display_text(_api_url)
         _display_key = mas_unisync_core.renpy_display_text(_masked_key if _masked_key else _("not configured"))
         _display_sync_status = mas_unisync_core.renpy_display_text(_status.get("sync_status", "disabled"))
         _display_lock_state = mas_unisync_core.renpy_display_text(_status.get("lock_state", "unlocked"))
@@ -189,9 +194,7 @@ screen mas_unisync_settingpane():
         text _("MAS UniSync"):
             style "main_menu_version"
 
-        text _("Host: ") + _display_host:
-            style "main_menu_version"
-        text _("API: ") + _display_api:
+        text _("API URL: ") + _display_api:
             style "main_menu_version"
         text _("Profile key: ") + _display_key:
             style "main_menu_version"
@@ -213,7 +216,7 @@ screen mas_unisync_settingpane():
 
         hbox:
             spacing 12
-            textbutton _("Paste Host"):
+            textbutton _("Paste API URL"):
                 style "mas_button_simple"
                 action Function(mas_unisync_paste_host)
             textbutton _("Paste Profile Key"):

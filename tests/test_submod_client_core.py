@@ -21,13 +21,14 @@ def load_client_module(name: str):
     return module
 
 
-def test_host_normalization_and_url_derivation_use_fixed_deployment_ports():
+def test_api_url_normalization_preserves_full_urls_and_migrates_legacy_hosts():
     core = load_client_module("mas_unisync_core")
 
-    assert core.normalize_host(" http://100.72.137.92:8000/ ") == "100.72.137.92"
-    assert core.normalize_host("https://100.72.137.92/account/profile-keys") == "100.72.137.92"
-    assert core.api_base_url("100.72.137.92") == "http://100.72.137.92:8000"
-    assert core.portal_profile_keys_url("100.72.137.92") == "http://100.72.137.92/account/profile-keys"
+    assert core.normalize_api_url(" https://api.example.test:8443/base/ ") == "https://api.example.test:8443/base"
+    assert core.normalize_api_url("http://100.72.137.92:9000") == "http://100.72.137.92:9000"
+    assert core.normalize_api_url("100.72.137.92") == "http://100.72.137.92:8000"
+    assert core.normalize_api_url("100.72.137.92:9000") == "http://100.72.137.92:9000"
+    assert core.api_base_url("https://api.example.test:8443/base/") == "https://api.example.test:8443/base"
 
 
 def test_multipart_body_contains_file_and_optional_version_metadata(tmp_path):

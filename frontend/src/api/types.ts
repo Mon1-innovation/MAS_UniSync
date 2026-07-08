@@ -25,6 +25,7 @@ export interface Profile {
   display_name: string | null
   profile_key: string
   storage_usage: number
+  storage_limit: number
   revoked_at: string | null
   last_used_at: string | null
   last_upload_at: string | null
@@ -85,4 +86,21 @@ export interface ProfileResponse {
 
 export interface StatusResponse {
   status: string
+}
+
+export interface SystemSettings {
+  backend_api_url: string
+  frontend_web_url: string
+  profile_storage_limit_bytes: number
+  max_active_profiles_per_account: number
+}
+
+export interface SystemSettingsResponse {
+  settings: SystemSettings
+}
+
+export interface PublicWebConfig {
+  backend_api_url: string
+  frontend_web_url: string
+  profile_keys_url: string
 }
