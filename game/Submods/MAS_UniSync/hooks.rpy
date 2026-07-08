@@ -28,7 +28,7 @@ init -968 python:
             renpy_version = renpy.version(tuple=False)
         except Exception:
             renpy_version = getattr(renpy, "version_string", "")
-        mas_version = getattr(persistent, "version_number", "")
+        mas_version = getattr(config, "version", "")
         return str(renpy_version or ""), str(mas_version or "")
 
     def mas_unisync_cleanup_for_renpy6():

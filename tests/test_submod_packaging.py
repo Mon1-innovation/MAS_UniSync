@@ -98,6 +98,22 @@ def test_startup_sync_does_not_abort_mas_when_profile_key_is_invalid():
     assert "mas_unisync_startup_sync(force=True, raise_on_failure=True)" in hooks_source
 
 
+def test_mas_version_metadata_comes_from_config_version():
+    hooks_source = Path("game/Submods/MAS_UniSync/hooks.rpy").read_text(
+        encoding="utf-8"
+    )
+    versions_source = hooks_source.split(
+        "def mas_unisync_versions():",
+        1,
+    )[1].split(
+        "    def mas_unisync_cleanup_for_renpy6():",
+        1,
+    )[0]
+
+    assert 'getattr(config, "version", "")' in versions_source
+    assert 'getattr(persistent, "version_number", "")' not in versions_source
+
+
 def test_profile_key_setup_requests_immediate_upload_after_cloud_sync():
     header_source = Path("game/Submods/MAS_UniSync/header.rpy").read_text(
         encoding="utf-8"
