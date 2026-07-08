@@ -1,8 +1,10 @@
 import {Button, Box, Text} from '@primer/react'
 import {CopyIcon} from '@primer/octicons-react'
 import {useState} from 'react'
+import {useTranslation} from 'react-i18next'
 
-export function CopyableSecret({value, copyLabel = 'Copy profile key'}: {value: string; copyLabel?: string}) {
+export function CopyableSecret({value, copyLabel}: {value: string; copyLabel?: string}) {
+  const {t} = useTranslation()
   const [copied, setCopied] = useState(false)
 
   async function copy() {
@@ -18,8 +20,8 @@ export function CopyableSecret({value, copyLabel = 'Copy profile key'}: {value: 
   return (
     <Box className={`copyable-secret ${copied ? 'is-copied' : ''}`}>
       <Text as="code">{value}</Text>
-      <Button type="button" size="small" leadingVisual={CopyIcon} aria-label={copyLabel} onClick={copy}>
-        {copied ? 'Copied' : 'Copy'}
+      <Button type="button" size="small" leadingVisual={CopyIcon} aria-label={copyLabel || t('common.copyProfileKey')} onClick={copy}>
+        {copied ? t('common.copied') : t('common.copy')}
       </Button>
     </Box>
   )

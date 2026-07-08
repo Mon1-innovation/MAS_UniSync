@@ -1,10 +1,13 @@
 import {Button, Box, Text, Avatar} from '@primer/react'
 import {DatabaseIcon, SignOutIcon} from '@primer/octicons-react'
+import {useTranslation} from 'react-i18next'
 import {useAuth} from '../auth/AuthProvider'
+import {LanguageSwitcher} from '../components/LanguageSwitcher'
 
 export function Header() {
+  const {t} = useTranslation()
   const {user, logout} = useAuth()
-  const name = user?.display_name || user?.username || 'Guest'
+  const name = user?.display_name || user?.username || t('header.guest')
   const initial = name.trim().charAt(0).toUpperCase() || 'U'
 
   return (
@@ -20,6 +23,7 @@ export function Header() {
         </Box>
         {user ? (
           <Box className="header-user">
+            <LanguageSwitcher />
             {user.avatar_url ? (
               <Avatar src={user.avatar_url} alt={name} size={24} />
             ) : (
@@ -29,7 +33,7 @@ export function Header() {
             )}
             <Text sx={{fontSize: 1, color: 'canvas.default'}}>{user.username}</Text>
             <Button type="button" size="small" leadingVisual={SignOutIcon} onClick={logout}>
-              Sign out
+              {t('header.signOut')}
             </Button>
           </Box>
         ) : null}

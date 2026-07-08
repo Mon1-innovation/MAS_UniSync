@@ -1,4 +1,5 @@
 import {Button, Box, Text} from '@primer/react'
+import {useTranslation} from 'react-i18next'
 
 interface ConfirmDialogProps {
   title: string
@@ -11,6 +12,7 @@ interface ConfirmDialogProps {
 }
 
 export function ConfirmDialog({title, message, confirmText, variant = 'danger', onConfirm, onCancel, isBusy}: ConfirmDialogProps) {
+  const {t} = useTranslation()
   return (
     <Box className="dialog-backdrop" role="presentation">
       <Box className="confirm-dialog" role="dialog" aria-modal="true" aria-labelledby="confirm-dialog-title">
@@ -22,7 +24,7 @@ export function ConfirmDialog({title, message, confirmText, variant = 'danger', 
         </Text>
         <Box sx={{display: 'flex', justifyContent: 'flex-end', gap: 2}}>
           <Button type="button" onClick={onCancel} disabled={isBusy}>
-            Cancel
+            {t('common.cancel')}
           </Button>
           <Button type="button" variant={variant} onClick={onConfirm} disabled={isBusy}>
             {confirmText}

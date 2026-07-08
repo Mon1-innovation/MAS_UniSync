@@ -1,4 +1,5 @@
 import {Box, Button, Text} from '@primer/react'
+import {useTranslation} from 'react-i18next'
 
 export function FormDialog({
   title,
@@ -13,6 +14,7 @@ export function FormDialog({
   onCancel: () => void
   isBusy?: boolean
 }) {
+  const {t} = useTranslation()
   return (
     <Box className="dialog-backdrop" role="presentation">
       <Box className="confirm-dialog" role="dialog" aria-modal="true" aria-labelledby="form-dialog-title">
@@ -22,7 +24,7 @@ export function FormDialog({
         {children}
         <Box sx={{display: 'flex', justifyContent: 'flex-end', gap: 2, mt: 3}}>
           <Button type="button" onClick={onCancel} disabled={isBusy}>
-            Cancel
+            {t('common.cancel')}
           </Button>
           <Button type="submit" variant="primary" disabled={isBusy}>
             {submitText}

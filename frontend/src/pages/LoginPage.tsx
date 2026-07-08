@@ -5,6 +5,7 @@ import {useTranslation} from 'react-i18next'
 import {ApiError} from '../api/client'
 import {useAuth} from '../auth/AuthProvider'
 import {ErrorBanner} from '../components/ErrorBanner'
+import {LanguageSwitcher} from '../components/LanguageSwitcher'
 
 export function LoginPage() {
   const {t} = useTranslation()
@@ -34,6 +35,7 @@ export function LoginPage() {
   return (
     <Box className="login-page">
       <Box className="login-card">
+        <LanguageSwitcher className="login-language" />
         <Box className="login-brand">
           <span className="brand-mark" aria-hidden="true">
             <DatabaseIcon size={18} />

@@ -3,14 +3,35 @@ export const resources = {
     translation: {
       common: {
         cancel: '取消',
+        copied: '已复制',
+        copy: '复制',
+        copyProfileKey: '复制 Profile Key',
         loading: '加载中',
+        never: '从未',
+        somethingWentWrong: '出现问题',
         languageChinese: '中文',
         languageEnglish: 'English',
+        storageUsage: '存储用量',
       },
       header: {
         guest: '访客',
         signOut: '退出登录',
         languageLabel: '语言',
+      },
+      nav: {
+        primary: '主导航',
+        profileKeys: 'Profile Key',
+        admin: '管理',
+        users: '用户',
+        auditLogs: '审计日志',
+        settings: '设置',
+      },
+      status: {
+        active: '启用',
+        none: '无',
+        admin: '管理员',
+        user: '用户',
+        revoked: '已撤销',
       },
       login: {
         intro: '使用你的 Flarum 账号登录。',
@@ -27,14 +48,35 @@ export const resources = {
     translation: {
       common: {
         cancel: 'Cancel',
+        copied: 'Copied',
+        copy: 'Copy',
+        copyProfileKey: 'Copy profile key',
         loading: 'Loading',
+        never: 'Never',
+        somethingWentWrong: 'Something went wrong',
         languageChinese: '中文',
         languageEnglish: 'English',
+        storageUsage: 'Storage usage',
       },
       header: {
         guest: 'Guest',
         signOut: 'Sign out',
         languageLabel: 'Language',
+      },
+      nav: {
+        primary: 'Primary',
+        profileKeys: 'Profile keys',
+        admin: 'Admin',
+        users: 'Users',
+        auditLogs: 'Audit logs',
+        settings: 'Settings',
+      },
+      status: {
+        active: 'active',
+        none: 'none',
+        admin: 'admin',
+        user: 'user',
+        revoked: 'revoked',
       },
       login: {
         intro: 'Sign in with your Flarum account.',

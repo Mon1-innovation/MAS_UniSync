@@ -45,10 +45,10 @@ describe('CopyableSecret', () => {
 
     render(<CopyableSecret value="maspk_unit" />)
 
-    await userEvent.click(screen.getByRole('button', {name: /copy profile key/i}))
+    await userEvent.click(screen.getByRole('button', {name: /复制 profile key/i}))
 
     expect(execCommand).toHaveBeenCalledWith('copy')
     expect(copiedValues).toEqual(['maspk_unit'])
-    expect(screen.getByText('Copied')).toBeInTheDocument()
+    expect(screen.getByText('已复制')).toBeInTheDocument()
   })
 })

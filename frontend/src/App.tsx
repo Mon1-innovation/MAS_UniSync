@@ -1,5 +1,6 @@
 import {BaseStyles, ThemeProvider} from '@primer/react'
 import {NavLink, Navigate, Route, Routes} from 'react-router-dom'
+import {useTranslation} from 'react-i18next'
 import {AuthProvider} from './auth/AuthProvider'
 import {RequireAdmin} from './auth/RequireAdmin'
 import {RequireAuth} from './auth/RequireAuth'
@@ -107,16 +108,17 @@ export function App() {
 }
 
 function AdminNav() {
+  const {t} = useTranslation()
   return (
-    <nav className="subnav" aria-label="Admin">
+    <nav className="subnav" aria-label={t('nav.admin')}>
       <NavLink to="/admin/users" className={({isActive}) => (isActive ? 'is-active' : undefined)}>
-        Users
+        {t('nav.users')}
       </NavLink>
       <NavLink to="/admin/audit-logs" className={({isActive}) => (isActive ? 'is-active' : undefined)}>
-        Audit logs
+        {t('nav.auditLogs')}
       </NavLink>
       <NavLink to="/admin/settings" className={({isActive}) => (isActive ? 'is-active' : undefined)}>
-        Settings
+        {t('nav.settings')}
       </NavLink>
     </nav>
   )

@@ -3,6 +3,7 @@ import userEvent from '@testing-library/user-event'
 import {afterEach, beforeEach, describe, expect, it, vi} from 'vitest'
 import {MemoryRouter} from 'react-router-dom'
 import {App} from './App'
+import {i18n} from './i18n'
 import type {User} from './api/types'
 
 const adminUser: User = {
@@ -48,8 +49,9 @@ function expectFetchCalled(path: string, options: Partial<RequestInit> = {}) {
 }
 
 describe('App', () => {
-  beforeEach(() => {
+  beforeEach(async () => {
     localStorage.clear()
+    await i18n.changeLanguage('zh')
   })
 
   afterEach(() => {
@@ -67,6 +69,28 @@ describe('App', () => {
     )
 
     expect(await screen.findByRole('button', {name: '登录'})).toBeInTheDocument()
+  })
+
+  it('switches to English and persists the language choice', async () => {
+    mockFetch(() => json({detail: {code: 'not_found'}}, {status: 404}))
+    const view = render(
+      <MemoryRouter initialEntries={['/login']}>
+        <App />
+      </MemoryRouter>,
+    )
+
+    await userEvent.click(await screen.findByRole('button', {name: 'English'}))
+    expect(screen.getByRole('button', {name: 'Sign in'})).toBeInTheDocument()
+
+    view.unmount()
+    render(
+      <MemoryRouter initialEntries={['/login']}>
+        <App />
+      </MemoryRouter>,
+    )
+
+    expect(await screen.findByRole('button', {name: 'Sign in'})).toBeInTheDocument()
+    expect(localStorage.getItem('mas_unisync_language')).toBe('en')
   })
 
   it('logs in and redirects users to profile keys', async () => {
@@ -152,7 +176,7 @@ describe('App', () => {
       </MemoryRouter>,
     )
 
-    await userEvent.click(await screen.findByRole('button', {name: /sign out/i}))
+    await userEvent.click(await screen.findByRole('button', {name: /退出登录/i}))
 
     await expect(screen.findByRole('button', {name: /登录/i})).resolves.toBeInTheDocument()
     expect(localStorage.getItem('mas_unisync_user')).toBeNull()
@@ -312,7 +336,7 @@ describe('App', () => {
     const link = await screen.findByRole('link', {name: /desktop/i})
     expect(link).toHaveAttribute('href', '/admin/profiles/11')
     expect(screen.queryByRole('heading', {name: /^profiles$/i})).not.toBeInTheDocument()
-    expect(screen.getByText('active')).toBeInTheDocument()
+    expect(screen.getByText('启用')).toBeInTheDocument()
     expect(document.querySelector('time[datetime="2026-07-07T08:00:00"]')).toBeInTheDocument()
     expect(document.querySelector('time[datetime="2026-07-07T08:30:00"]')).toBeInTheDocument()
     expect(document.querySelector('time[datetime="2026-07-07T09:00:00"]')).toBeInTheDocument()
@@ -712,7 +736,7 @@ describe('App', () => {
 
     await expect(screen.findByRole('heading', {level: 1, name: 'Main'})).resolves.toBeInTheDocument()
     expect(screen.getByText('Profile file size')).toBeInTheDocument()
-    expect(screen.getByRole('progressbar', {name: /storage usage/i})).toHaveAttribute('aria-valuenow', '50')
+    expect(screen.getByRole('progressbar', {name: /存储用量/i})).toHaveAttribute('aria-valuenow', '50')
     expect(screen.getByText('Current persistent')).toBeInTheDocument()
     expect(screen.getByText(/version #22/i)).toBeInTheDocument()
     expect(screen.getAllByText('12 B').length).toBeGreaterThanOrEqual(1)
@@ -869,7 +893,7 @@ describe('App', () => {
 
     await expect(screen.findByRole('heading', {level: 1, name: 'Main'})).resolves.toBeInTheDocument()
     expect(screen.getByText('Profile file size')).toBeInTheDocument()
-    expect(screen.getByRole('progressbar', {name: /storage usage/i})).toHaveAttribute('aria-valuenow', '50')
+    expect(screen.getByRole('progressbar', {name: /存储用量/i})).toHaveAttribute('aria-valuenow', '50')
     expect(screen.getByText((_content, element) => element?.textContent === '12 B / 24 B')).toBeInTheDocument()
     expect(screen.getAllByText('12 B').length).toBeGreaterThanOrEqual(1)
     expect(screen.getAllByText('sha-current').length).toBeGreaterThanOrEqual(1)
