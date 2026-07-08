@@ -1,0 +1,127 @@
+name: Release on Push or Manual Dispatch
+
+on:
+  push:
+    branches:
+      - main
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'Release version (will be automatically extracted from header.rpy if not specified)'
+        required: false
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.x'
+
+      - name: Extract version from header.rpy
+        id: get_version
+        run: |
+          python - <<'PY'
+          import os
+          import re
+          from pathlib import Path
+
+          header = Path("game/Submods/MAS_UniSync/header.rpy")
+          text = header.read_text(encoding="utf-8")
+          match = re.search(r'mas_unisync_version\s*=\s*"([^"]+)"', text)
+          if not match:
+              raise SystemExit("Unable to extract mas_unisync_version from header.rpy")
+
+          version = match.group(1)
+          print(f"Extracted version: {version}")
+          with open(os.environ["GITHUB_OUTPUT"], "a", encoding="utf-8") as output:
+              output.write(f"version={version}\n")
+          PY
+
+      - name: Use provided or extracted version
+        id: set_version
+        run: |
+          version="${{ github.event.inputs.version }}"
+          if [ -z "$version" ]; then
+            version="${{ steps.get_version.outputs.version }}"
+          fi
+          echo "Using version: $version"
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+
+      - name: Check if release exists
+        id: check_release
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          status=$(curl -L -s -o /dev/null -w "%{http_code}" \
+            -H "Authorization: Bearer $GITHUB_TOKEN" \
+            -H "Accept: application/vnd.github+json" \
+            -H "X-GitHub-Api-Version: 2022-11-28" \
+            "https://api.github.com/repos/${{ github.repository }}/releases/tags/${{ steps.set_version.outputs.version }}")
+
+          if [ "$status" = "404" ]; then
+            echo "Release does not exist"
+            echo "create_release=true" >> "$GITHUB_OUTPUT"
+          elif [ "$status" = "200" ]; then
+            echo "Release already exists"
+            echo "create_release=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "Unexpected GitHub API status: $status"
+            exit 1
+          fi
+
+      - name: Create release version file
+        if: steps.check_release.outputs.create_release == 'true'
+        run: |
+          mkdir -p game/python-packages
+          echo "${{ steps.set_version.outputs.version }}" > game/python-packages/mas_unisync_release_version
+
+      - name: Create zip package
+        if: steps.check_release.outputs.create_release == 'true'
+        run: |
+          zip -r MAS_UniSync-${{ steps.set_version.outputs.version }}.zip game \
+            -x 'game/saves/*' \
+            -x 'game/Submods/MAS_UniSync/*.pyc'
+
+      - name: Generate Release Notes
+        id: generate_release_notes
+        if: steps.check_release.outputs.create_release == 'true'
+        run: |
+          release_notes=$(git log -1 --pretty=%B)
+          echo "$release_notes" | sed 's/^/- /' > release_notes.md
+          echo "## MAS UniSync ${{ steps.set_version.outputs.version }}" | cat - release_notes.md > temp && mv temp release_notes.md
+          echo "RELEASE_NOTES_PATH=release_notes.md" >> "$GITHUB_OUTPUT"
+
+      - name: Create Release
+        if: steps.check_release.outputs.create_release == 'true'
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ steps.set_version.outputs.version }}
+          body_path: ${{ steps.generate_release_notes.outputs.RELEASE_NOTES_PATH }}
+          files: |
+            MAS_UniSync-${{ steps.set_version.outputs.version }}.zip
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Skip release if already exists
+        if: steps.check_release.outputs.create_release == 'false'
+        run: |
+          echo "Release ${{ steps.set_version.outputs.version }} already exists. Skipping release creation."
+
+      - name: Upload artifact
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: release-files
+          path: |
+            MAS_UniSync-${{ steps.set_version.outputs.version }}.zip
+            release_notes.md
+          if-no-files-found: ignore
+          retention-days: 30
