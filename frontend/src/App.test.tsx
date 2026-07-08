@@ -894,9 +894,8 @@ describe('App', () => {
       </MemoryRouter>,
     )
 
-    const filesLink = await screen.findByRole('link', {name: /(view files|查看文件)/i})
-    expect(filesLink).toHaveAttribute('href', '/account/profiles/9')
-    await userEvent.click(filesLink)
+    const filesButton = await screen.findByRole('button', {name: /(view files|查看文件)/i})
+    await userEvent.click(filesButton)
 
     await expect(screen.findByRole('heading', {level: 1, name: 'Main'})).resolves.toBeInTheDocument()
     expect(screen.getByText(/(Profile file size|Profile 文件大小)/i)).toBeInTheDocument()

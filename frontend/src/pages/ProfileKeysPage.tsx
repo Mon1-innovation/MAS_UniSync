@@ -2,7 +2,7 @@ import {Box, Button, Text} from '@primer/react'
 import {FileDirectoryIcon, KeyIcon, PlusIcon, QuestionIcon, SyncIcon, TrashIcon} from '@primer/octicons-react'
 import {useEffect, useMemo, useState} from 'react'
 import {useTranslation} from 'react-i18next'
-import {Link} from 'react-router-dom'
+import {useNavigate} from 'react-router-dom'
 import {ApiError} from '../api/client'
 import {createProfileKey, deleteProfileKey, getPublicWebConfig, listProfileKeys, refreshProfileKey} from '../api/profileKeysApi'
 import type {Profile} from '../api/types'
@@ -19,6 +19,7 @@ type PendingAction = {type: 'refresh' | 'delete'; profile: Profile} | null
 
 export function ProfileKeysPage() {
   const {t} = useTranslation()
+  const navigate = useNavigate()
   const [profiles, setProfiles] = useState<Profile[]>([])
   const [isLoading, setIsLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
@@ -184,7 +185,7 @@ export function ProfileKeysPage() {
               <CopyableSecret value={profile.profile_key} />
             </Box>
             <Box className="row-actions">
-              <Button as={Link} to={`/account/profiles/${profile.id}`} size="small" leadingVisual={FileDirectoryIcon}>
+              <Button type="button" size="small" leadingVisual={FileDirectoryIcon} onClick={() => navigate(`/account/profiles/${profile.id}`)}>
                 {t('account.profileKeys.viewFiles')}
               </Button>
               <Button
