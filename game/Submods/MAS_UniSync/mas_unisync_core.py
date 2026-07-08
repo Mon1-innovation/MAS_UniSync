@@ -93,6 +93,12 @@ def renpy_display_text(value):
     text = text_type(value)
     return text.replace("{", "{{").replace("}", "}}")
 
+def renpy_safe_text(value):
+    """Escape curly braces so the string is safe for Ren'py text display (notify, dialog, etc.)."""
+    if value is None:
+        return ""
+    return text_type(value).replace('{', '{{').replace('}', '}}')
+
 
 def iso_now():
     return utc_now().replace(microsecond=0).isoformat() + "Z"

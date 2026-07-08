@@ -6,7 +6,9 @@ init -990 python:
     import json
 
     mas_unisync_version = "0.1.0"
-    mas_unisync_dir = os.path.dirname(renpy.loader.transfn("Submods/MAS_UniSync/header.rpy"))
+
+    mas_unisync_dir = os.path.join(renpy.config.gamedir, "Submods", "MAS_UniSync")
+
     if mas_unisync_dir not in sys.path:
         sys.path.insert(0, mas_unisync_dir)
 
@@ -137,8 +139,8 @@ init -989 python:
             mas_unisync_bootstrap_setup()
             renpy.notify(_("MAS UniSync profile key saved"))
         except Exception as exc:
-            mas_unisync_update_status(message=str(exc))
-            renpy.notify("MAS UniSync connection failed: " + str(exc))
+            mas_unisync_update_status(message=mas_unisync_core.renpy_safe_text(str(exc)))
+            renpy.notify("MAS UniSync connection failed: " + mas_unisync_core.renpy_safe_text(str(exc)))
         renpy.restart_interaction()
 
     def mas_unisync_clear_profile_key():
@@ -176,15 +178,7 @@ init -989 python:
             mas_unisync_status["last_error"] = message
 
     def mas_unisync_profile_key_on_change(profile_key):
-        if not profile_key:
-            mas_unisync_update_status(message="")
-            return True, ""
-        try:
-            mas_unisync_bootstrap_setup()
-            return True, ""
-        except Exception as exc:
-            return False, str(exc)
-
+        return False, _("Please use the paste button in the MAS UniSync settings panel to configure your profile key.")
     def mas_unisync_host_on_change(host):
         mas_unisync_save_api_url(host)
         return True, ""

@@ -169,8 +169,8 @@ init -968 python:
                 mas_unisync_update_status(session.status)
             renpy.notify(_("MAS UniSync connection OK"))
         except Exception as exc:
-            mas_unisync_update_status(message=str(exc))
-            renpy.notify("MAS UniSync connection failed: " + str(exc))
+            mas_unisync_update_status(message=mas_unisync_core.renpy_safe_text(str(exc)))
+            renpy.notify("MAS UniSync connection failed: " + mas_unisync_core.renpy_safe_text(str(exc)))
 
     def mas_unisync_manual_upload():
         global mas_unisync_session
@@ -193,8 +193,8 @@ init -968 python:
             mas_unisync_upload_now(raise_on_failure=True, force=True)
             renpy.notify(_("MAS UniSync upload complete"))
         except Exception as exc:
-            mas_unisync_update_status(message=str(exc))
-            renpy.notify("MAS UniSync upload failed: " + str(exc))
+            mas_unisync_update_status(message=mas_unisync_core.renpy_safe_text(str(exc)))
+            renpy.notify("MAS UniSync upload failed: " + mas_unisync_core.renpy_safe_text(str(exc)))
         finally:
             renpy.restart_interaction()
 
