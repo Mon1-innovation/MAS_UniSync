@@ -1,6 +1,7 @@
 import {Box, Button, Text} from '@primer/react'
 import {FileDirectoryIcon, KeyIcon, PlusIcon, SyncIcon, TrashIcon} from '@primer/octicons-react'
 import {useEffect, useMemo, useState} from 'react'
+import {useTranslation} from 'react-i18next'
 import {Link} from 'react-router-dom'
 import {ApiError} from '../api/client'
 import {createProfileKey, deleteProfileKey, getPublicWebConfig, listProfileKeys, refreshProfileKey} from '../api/profileKeysApi'
@@ -17,6 +18,7 @@ import {StatusLabel} from '../components/StatusLabel'
 type PendingAction = {type: 'refresh' | 'delete'; profile: Profile} | null
 
 export function ProfileKeysPage() {
+  const {t} = useTranslation()
   const [profiles, setProfiles] = useState<Profile[]>([])
   const [isLoading, setIsLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
@@ -26,7 +28,7 @@ export function ProfileKeysPage() {
   const [pendingAction, setPendingAction] = useState<PendingAction>(null)
   const [isBusy, setIsBusy] = useState(false)
 
- useEffect(() => {
+  useEffect(() => {
     let cancelled = false
     listProfileKeys()
       .then((response) => {
@@ -36,7 +38,7 @@ export function ProfileKeysPage() {
       })
       .catch((err) => {
         if (!cancelled) {
-          setError('Could not load profile keys.')
+          setError(t('account.profileKeys.loadError'))
         }
       })
       .finally(() => {
@@ -81,9 +83,9 @@ export function ProfileKeysPage() {
       setError(null)
     } catch (error) {
       if (error instanceof ApiError && error.code === 'active_profile_limit_exceeded') {
-        setError('已达到当前账户可用 profile 数量上限')
+        setError(t('account.profileKeys.limitError'))
       } else {
-        setError('Could not create this profile key.')
+        setError(t('account.profileKeys.createError'))
       }
     } finally {
       setIsBusy(false)
@@ -106,7 +108,7 @@ export function ProfileKeysPage() {
       }
       setPendingAction(null)
     } catch {
-      setError(actionType === 'delete' ? 'Could not delete this profile key.' : 'Could not refresh this profile key.')
+      setError(actionType === 'delete' ? t('account.profileKeys.deleteError') : t('account.profileKeys.refreshError'))
     } finally {
       setIsBusy(false)
     }
@@ -116,24 +118,26 @@ export function ProfileKeysPage() {
     <Box className="page-stack">
       <Box className="page-heading">
         <Box>
-          <Text as="h1">Profile keys</Text>
-          <Text as="p">Manage the keys your MAS submod uses to sync persistent data.</Text>
+          <Text as="h1">{t('account.profileKeys.title')}</Text>
+          <Text as="p">{t('account.profileKeys.description')}</Text>
         </Box>
         <Button type="button" variant="primary" leadingVisual={PlusIcon} onClick={() => setIsCreateOpen(true)}>
-          New profile key
+          {t('account.profileKeys.newKey')}
         </Button>
       </Box>
 
       {error ? <ErrorBanner message={error} /> : null}
       {isLoading ? <LoadingState /> : null}
-      {!isLoading && sortedProfiles.length === 0 ? <EmptyState title="No profile keys" message="Create a key before configuring the submod." /> : null}
+      {!isLoading && sortedProfiles.length === 0 ? (
+        <EmptyState title={t('account.profileKeys.emptyTitle')} message={t('account.profileKeys.emptyMessage')} />
+      ) : null}
 
       {backendApiUrl ? (
         <Box className="panel compact-panel">
           <Text as="h2" sx={{fontSize: 2, mt: 0}}>
-            Backend API URL
+            {t('account.profileKeys.backendApiUrl')}
           </Text>
-          <CopyableSecret value={backendApiUrl} copyLabel="Copy backend API URL" />
+          <CopyableSecret value={backendApiUrl} copyLabel={t('account.profileKeys.copyBackendApiUrl')} />
         </Box>
       ) : null}
 
@@ -146,39 +150,40 @@ export function ProfileKeysPage() {
             <Box className="row-main">
               <Box sx={{display: 'flex', alignItems: 'center', gap: 2, flexWrap: 'wrap'}}>
                 <Text as="h2" sx={{fontSize: 2, m: 0}}>
-                  {profile.display_name || `Profile #${profile.id}`}
+                  {profile.display_name || t('account.profileKeys.profileTitle', {id: profile.id})}
                 </Text>
                 <StatusLabel status={profile.revoked_at ? 'revoked' : 'active'} />
               </Box>
               <Text as="p" sx={{color: 'fg.muted', my: 1}}>
-                Profile ID #{profile.id} · Created <RelativeTime value={profile.created_at} /> · Last used{' '}
-                <RelativeTime value={profile.last_used_at} /> · Last upload <RelativeTime value={profile.last_upload_at} />
+                {t('account.profileKeys.profileId', {id: profile.id})} · {t('account.profileKeys.created')}{' '}
+                <RelativeTime value={profile.created_at} /> · {t('account.profileKeys.lastUsed')} <RelativeTime value={profile.last_used_at} /> ·{' '}
+                {t('account.profileKeys.lastUpload')} <RelativeTime value={profile.last_upload_at} />
               </Text>
               <CopyableSecret value={profile.profile_key} />
             </Box>
             <Box className="row-actions">
               <Button as={Link} to={`/account/profiles/${profile.id}`} size="small" leadingVisual={FileDirectoryIcon}>
-                View files
+                {t('account.profileKeys.viewFiles')}
               </Button>
               <Button
                 type="button"
                 size="small"
                 leadingVisual={SyncIcon}
-                aria-label={`Refresh key for ${profile.display_name || profile.id}`}
+                aria-label={t('account.profileKeys.refreshKeyFor', {name: profile.display_name || profile.id})}
                 onClick={() => setPendingAction({type: 'refresh', profile})}
                 disabled={Boolean(profile.revoked_at)}
               >
-                Refresh key
+                {t('account.profileKeys.refreshKey')}
               </Button>
               <Button
                 type="button"
                 size="small"
                 variant="danger"
                 leadingVisual={TrashIcon}
-                aria-label={`Delete key for ${profile.display_name || profile.id}`}
+                aria-label={t('account.profileKeys.deleteKeyFor', {name: profile.display_name || profile.id})}
                 onClick={() => setPendingAction({type: 'delete', profile})}
               >
-                Delete key
+                {t('account.profileKeys.deleteKey')}
               </Button>
             </Box>
           </Box>
@@ -187,10 +192,20 @@ export function ProfileKeysPage() {
 
       {isCreateOpen ? (
         <form onSubmit={handleCreate}>
-          <FormDialog title="New profile key" submitText="Create key" onCancel={() => setIsCreateOpen(false)} isBusy={isBusy}>
+          <FormDialog
+            title={t('account.profileKeys.createTitle')}
+            submitText={t('account.profileKeys.createSubmit')}
+            onCancel={() => setIsCreateOpen(false)}
+            isBusy={isBusy}
+          >
             <label className="field">
-              <span>Display name</span>
-              <input value={createName} onChange={(event) => setCreateName(event.target.value)} placeholder="Main persistent" autoFocus />
+              <span>{t('account.profileKeys.displayName')}</span>
+              <input
+                value={createName}
+                onChange={(event) => setCreateName(event.target.value)}
+                placeholder={t('account.profileKeys.displayNamePlaceholder')}
+                autoFocus
+              />
             </label>
           </FormDialog>
         </form>
@@ -198,13 +213,9 @@ export function ProfileKeysPage() {
 
       {pendingAction ? (
         <ConfirmDialog
-          title={pendingAction.type === 'refresh' ? 'Refresh profile key?' : 'Delete profile key?'}
-          message={
-            pendingAction.type === 'refresh'
-              ? 'The old key will stop working immediately. Copy the new key after refreshing.'
-              : 'This profile key and its stored persistent files will be deleted.'
-          }
-          confirmText={pendingAction.type === 'refresh' ? 'Refresh' : 'Delete'}
+          title={pendingAction.type === 'refresh' ? t('account.profileKeys.refreshTitle') : t('account.profileKeys.deleteTitle')}
+          message={pendingAction.type === 'refresh' ? t('account.profileKeys.refreshMessage') : t('account.profileKeys.deleteMessage')}
+          confirmText={pendingAction.type === 'refresh' ? t('account.profileKeys.refreshConfirm') : t('account.profileKeys.deleteConfirm')}
           onConfirm={handleConfirmAction}
           onCancel={() => setPendingAction(null)}
           isBusy={isBusy}

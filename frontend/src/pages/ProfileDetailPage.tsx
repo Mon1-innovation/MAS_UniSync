@@ -2,6 +2,7 @@ import {Box, Button, Text} from '@primer/react'
 import {ArrowLeftIcon, DownloadIcon, VersionsIcon} from '@primer/octicons-react'
 import {useEffect, useState} from 'react'
 import type {ReactNode} from 'react'
+import {useTranslation} from 'react-i18next'
 import {Link, useParams} from 'react-router-dom'
 import {ApiError} from '../api/client'
 import {
@@ -22,6 +23,7 @@ import {StorageUsageBar} from '../components/StorageUsageBar'
 import {StatusLabel} from '../components/StatusLabel'
 
 export function ProfileDetailPage() {
+  const {t} = useTranslation()
   const {profileId} = useParams()
   const numericProfileId = Number(profileId)
   const [profile, setProfile] = useState<Profile | null>(null)
@@ -34,7 +36,7 @@ export function ProfileDetailPage() {
   useEffect(() => {
     let cancelled = false
     if (!Number.isFinite(numericProfileId)) {
-      setError('Invalid profile id.')
+      setError(t('account.profileDetail.invalidProfileId'))
       setIsLoading(false)
       return
     }
@@ -54,7 +56,7 @@ export function ProfileDetailPage() {
       })
       .catch((error: unknown) => {
         if (!cancelled) {
-          setError(profileLoadErrorMessage(error))
+          setError(profileLoadErrorMessage(error, t))
         }
       })
       .finally(() => {
@@ -97,13 +99,14 @@ export function ProfileDetailPage() {
           <Box className="page-heading">
             <Box>
               <Button as={Link} to="/account/profile-keys" leadingVisual={ArrowLeftIcon} size="small">
-                Profile keys
+                {t('account.profileDetail.backToKeys')}
               </Button>
               <Text as="h1" sx={{mt: 3}}>
-                {profile.display_name || `Profile #${profile.id}`}
+                {profile.display_name || t('account.profileDetail.profileTitle', {id: profile.id})}
               </Text>
               <Text as="p">
-                Profile ID #{profile.id} · Created <RelativeTime value={profile.created_at} /> · Last upload{' '}
+                {t('account.profileDetail.profileId', {id: profile.id})} · {t('account.profileDetail.created')}{' '}
+                <RelativeTime value={profile.created_at} /> · {t('account.profileDetail.lastUpload')}{' '}
                 <RelativeTime value={profile.last_upload_at} />
               </Text>
             </Box>
@@ -112,14 +115,14 @@ export function ProfileDetailPage() {
 
           <Box className="panel">
             <Text as="h2" sx={{fontSize: 2, mt: 0}}>
-              Profile key
+              {t('account.profileDetail.profileKey')}
             </Text>
             <CopyableSecret value={profile.profile_key} />
             <Box className="meta-line">
-              Last used <RelativeTime value={profile.last_used_at} />
+              {t('account.profileDetail.lastUsed')} <RelativeTime value={profile.last_used_at} />
             </Box>
             <Box className="info-grid" sx={{mt: 3}}>
-              <Info label="Profile file size" value={<ByteSize value={profile.storage_usage} />} />
+              <Info label={t('account.profileDetail.profileFileSize')} value={<ByteSize value={profile.storage_usage} />} />
             </Box>
             <StorageUsageBar usage={profile.storage_usage} limit={profile.storage_limit} />
           </Box>
@@ -128,31 +131,31 @@ export function ProfileDetailPage() {
             <Box className="section-heading">
               <Box>
                 <Text as="h2" sx={{fontSize: 2, mt: 0, mb: 1}}>
-                  Current persistent
+                  {t('account.profileDetail.currentPersistent')}
                 </Text>
                 {current ? (
                   <Text as="p" sx={{color: 'fg.muted', m: 0}}>
-                    Version #{current.id} · Uploaded <RelativeTime value={current.created_at} />
+                    {t('account.profileDetail.versionUploaded', {id: current.id})} <RelativeTime value={current.created_at} />
                   </Text>
                 ) : null}
               </Box>
               {current ? (
                 <Button type="button" leadingVisual={DownloadIcon} onClick={handleDownloadCurrent} disabled={downloadingId === 'current'}>
-                  Download current
+                  {t('account.profileDetail.downloadCurrent')}
                 </Button>
               ) : null}
             </Box>
             {current ? (
               <Box className="info-grid">
-                <Info label="Size" value={<ByteSize value={current.size} />} />
+                <Info label={t('account.profileDetail.size')} value={<ByteSize value={current.size} />} />
                 <Info label="SHA-256" value={<code className="truncate">{current.sha256}</code>} />
-                <Info label="Ren'Py" value={current.renpy_version || 'Unknown'} />
-                <Info label="MAS" value={current.mas_version || 'Unknown'} />
+                <Info label="Ren'Py" value={current.renpy_version || t('account.profileDetail.unknown')} />
+                <Info label="MAS" value={current.mas_version || t('account.profileDetail.unknown')} />
               </Box>
             ) : (
               <Box className="empty-inline">
-                <Text as="strong">No current persistent</Text>
-                <Text as="p">This profile does not have an uploaded persistent file yet.</Text>
+                <Text as="strong">{t('account.profileDetail.noCurrentTitle')}</Text>
+                <Text as="p">{t('account.profileDetail.noCurrentMessage')}</Text>
               </Box>
             )}
           </Box>
@@ -161,24 +164,24 @@ export function ProfileDetailPage() {
             <Box className="table-heading">
               <Box>
                 <Text as="h2" sx={{fontSize: 2, mt: 0, mb: 1}}>
-                  Daily backups
+                  {t('account.profileDetail.dailyBackups')}
                 </Text>
                 <Text as="p" sx={{color: 'fg.muted', m: 0}}>
-                  {backups.length} retained backup{backups.length === 1 ? '' : 's'}
+                  {t('account.profileDetail.retainedBackups', {count: backups.length})}
                 </Text>
               </Box>
             </Box>
             {backups.length === 0 ? (
-              <EmptyState title="No backups" message="Backups appear after successful daily uploads." />
+              <EmptyState title={t('account.profileDetail.noBackupsTitle')} message={t('account.profileDetail.noBackupsMessage')} />
             ) : (
               <table>
                 <thead>
                   <tr>
-                    <th>Date</th>
-                    <th>Size</th>
+                    <th>{t('account.profileDetail.date')}</th>
+                    <th>{t('account.profileDetail.size')}</th>
                     <th>SHA-256</th>
-                    <th>Created</th>
-                    <th>Action</th>
+                    <th>{t('account.profileDetail.createdColumn')}</th>
+                    <th>{t('account.profileDetail.action')}</th>
                   </tr>
                 </thead>
                 <tbody>
@@ -201,11 +204,11 @@ export function ProfileDetailPage() {
                           type="button"
                           size="small"
                           leadingVisual={DownloadIcon}
-                          aria-label={`Download backup ${backup.backup_date}`}
+                          aria-label={t('account.profileDetail.downloadBackup', {date: backup.backup_date})}
                           onClick={() => handleDownloadBackup(backup)}
                           disabled={downloadingId === backup.id}
                         >
-                          Download
+                          {t('account.profileDetail.download')}
                         </Button>
                       </td>
                     </tr>
@@ -231,16 +234,16 @@ async function getOptionalCurrentPersistent(profileId: number): Promise<Version 
   }
 }
 
-function profileLoadErrorMessage(error: unknown) {
+function profileLoadErrorMessage(error: unknown, t: (key: string) => string) {
   if (error instanceof ApiError) {
     if (error.code === 'profile_not_found') {
-      return 'This profile was not found for your account.'
+      return t('account.profileDetail.notFound')
     }
     if (error.code === 'not_authenticated') {
-      return 'Please sign in again before opening this profile.'
+      return t('account.profileDetail.signInAgain')
     }
   }
-  return 'Could not load this profile.'
+  return t('account.profileDetail.loadError')
 }
 
 function Info({label, value}: {label: string; value: ReactNode}) {

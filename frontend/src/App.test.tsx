@@ -114,7 +114,7 @@ describe('App', () => {
     await userEvent.type(screen.getByLabelText(/密码/i), 'secret')
     await userEvent.click(screen.getByRole('button', {name: /登录/i}))
 
-    await expect(screen.findByRole('heading', {level: 1, name: /profile keys/i})).resolves.toBeInTheDocument()
+    await expect(screen.findByRole('heading', {level: 1, name: /Profile Key/i})).resolves.toBeInTheDocument()
     expect(JSON.parse(localStorage.getItem('mas_unisync_user') || '{}')).toMatchObject({username: 'player'})
   })
 
@@ -154,7 +154,7 @@ describe('App', () => {
       </MemoryRouter>,
     )
 
-    await waitFor(() => expect(screen.getByRole('heading', {name: /profile keys/i})).toBeInTheDocument())
+    await waitFor(() => expect(screen.getByRole('heading', {name: /Profile Key/i})).toBeInTheDocument())
     expect(screen.queryByRole('link', {name: /^admin$/i})).not.toBeInTheDocument()
   })
 
@@ -214,9 +214,9 @@ describe('App', () => {
       </MemoryRouter>,
     )
 
-    await userEvent.click(await screen.findByRole('button', {name: /new profile key/i}))
-    await userEvent.type(screen.getByLabelText(/display name/i), 'Laptop')
-    await userEvent.click(screen.getByRole('button', {name: /create key/i}))
+    await userEvent.click(await screen.findByRole('button', {name: /新建 Profile Key/i}))
+    await userEvent.type(screen.getByLabelText(/显示名称/i), 'Laptop')
+    await userEvent.click(screen.getByRole('button', {name: /创建 Key/i}))
 
     await expect(screen.findByText('maspk_created')).resolves.toBeInTheDocument()
     expect(submittedBody).toEqual({display_name: 'Laptop'})
@@ -247,11 +247,11 @@ describe('App', () => {
       </MemoryRouter>,
     )
 
-    await userEvent.click(await screen.findByRole('button', {name: /new profile key/i}))
-    await userEvent.type(screen.getByLabelText(/display name/i), 'Laptop')
-    await userEvent.click(screen.getByRole('button', {name: /create key/i}))
+    await userEvent.click(await screen.findByRole('button', {name: /新建 Profile Key/i}))
+    await userEvent.type(screen.getByLabelText(/显示名称/i), 'Laptop')
+    await userEvent.click(screen.getByRole('button', {name: /创建 Key/i}))
 
-    await expect(screen.findByText('已达到当前账户可用 profile 数量上限')).resolves.toBeInTheDocument()
+    await expect(screen.findByText('已达到当前账户可用 Profile 数量上限。')).resolves.toBeInTheDocument()
   })
 
   it('shows the configured backend API URL on the profile keys page', async () => {
@@ -413,16 +413,16 @@ describe('App', () => {
     )
 
     await expect(screen.findByText('maspk_old')).resolves.toBeInTheDocument()
-    await userEvent.click(screen.getByRole('button', {name: /refresh key/i}))
-    await userEvent.click(await screen.findByRole('button', {name: /^refresh$/i}))
+    await userEvent.click(screen.getByRole('button', {name: /(refresh key|刷新 .+ 的 Key)/i}))
+    await userEvent.click(await screen.findByRole('button', {name: /^(refresh|刷新)$/i}))
     await expect(screen.findByText('maspk_new')).resolves.toBeInTheDocument()
 
-    await userEvent.click(screen.getByRole('button', {name: /delete key/i}))
-    expect(screen.getByText(/stored persistent files will be deleted/i)).toBeInTheDocument()
-    await userEvent.click(await screen.findByRole('button', {name: /^delete$/i}))
+    await userEvent.click(screen.getByRole('button', {name: /(delete key|删除 .+ 的 Key)/i}))
+    expect(screen.getByText(/persistent 文件将被删除/i)).toBeInTheDocument()
+    await userEvent.click(await screen.findByRole('button', {name: /^(delete|删除)$/i}))
 
     await waitFor(() => expect(screen.queryByText('Main')).not.toBeInTheDocument())
-    expect(screen.getByText('No profile keys')).toBeInTheDocument()
+    expect(screen.getByText('没有 Profile Key')).toBeInTheDocument()
     expectFetchCalled('/account/profile-keys/9', {method: 'DELETE'})
   })
 
@@ -457,10 +457,10 @@ describe('App', () => {
       </MemoryRouter>,
     )
 
-    const deleteButton = await screen.findByRole('button', {name: /delete key/i})
+    const deleteButton = await screen.findByRole('button', {name: /(delete key|删除 .+ 的 Key)/i})
     expect(deleteButton).toBeEnabled()
     await userEvent.click(deleteButton)
-    await userEvent.click(await screen.findByRole('button', {name: /^delete$/i}))
+    await userEvent.click(await screen.findByRole('button', {name: /^(delete|删除)$/i}))
 
     await waitFor(() => expect(screen.queryByText('Old key')).not.toBeInTheDocument())
     expectFetchCalled('/account/profile-keys/9', {method: 'DELETE'})
@@ -497,11 +497,11 @@ describe('App', () => {
       </MemoryRouter>,
     )
 
-    await userEvent.click(await screen.findByRole('button', {name: /delete key/i}))
-    const confirmButton = await screen.findByRole('button', {name: /^delete$/i})
+    await userEvent.click(await screen.findByRole('button', {name: /(delete key|删除 .+ 的 Key)/i}))
+    const confirmButton = await screen.findByRole('button', {name: /^(delete|删除)$/i})
     await userEvent.click(confirmButton)
 
-    await expect(screen.findByText(/could not delete this profile key/i)).resolves.toBeInTheDocument()
+    await expect(screen.findByText(/(could not delete this profile key|无法删除这个 Profile Key)/i)).resolves.toBeInTheDocument()
     expect(confirmButton).toBeEnabled()
     expect(screen.getByText('Main')).toBeInTheDocument()
   })
@@ -735,7 +735,7 @@ describe('App', () => {
     )
 
     await expect(screen.findByRole('heading', {level: 1, name: 'Main'})).resolves.toBeInTheDocument()
-    expect(screen.getByText('Profile file size')).toBeInTheDocument()
+    expect(screen.getByText(/(Profile file size|Profile 文件大小)/i)).toBeInTheDocument()
     expect(screen.getByRole('progressbar', {name: /存储用量/i})).toHaveAttribute('aria-valuenow', '50')
     expect(screen.getByText('Current persistent')).toBeInTheDocument()
     expect(screen.getByText(/version #22/i)).toBeInTheDocument()
@@ -745,8 +745,8 @@ describe('App', () => {
     expect(screen.getByText('sha-backup')).toBeInTheDocument()
     expect(screen.queryByLabelText(/backup id/i)).not.toBeInTheDocument()
 
-    await userEvent.click(screen.getByRole('button', {name: /download current/i}))
-    await userEvent.click(screen.getByRole('button', {name: /download backup 2026-07-07/i}))
+    await userEvent.click(screen.getByRole('button', {name: /(download current|下载当前文件)/i}))
+    await userEvent.click(screen.getByRole('button', {name: /(download backup 2026-07-07|下载 2026-07-07 的备份)/i}))
     await userEvent.click(screen.getByRole('button', {name: /restore backup 2026-07-07/i}))
 
     expectFetchCalled('/admin/profiles/9/persistent/current')
@@ -887,20 +887,20 @@ describe('App', () => {
       </MemoryRouter>,
     )
 
-    const filesLink = await screen.findByRole('link', {name: /view files/i})
+    const filesLink = await screen.findByRole('link', {name: /(view files|查看文件)/i})
     expect(filesLink).toHaveAttribute('href', '/account/profiles/9')
     await userEvent.click(filesLink)
 
     await expect(screen.findByRole('heading', {level: 1, name: 'Main'})).resolves.toBeInTheDocument()
-    expect(screen.getByText('Profile file size')).toBeInTheDocument()
+    expect(screen.getByText(/(Profile file size|Profile 文件大小)/i)).toBeInTheDocument()
     expect(screen.getByRole('progressbar', {name: /存储用量/i})).toHaveAttribute('aria-valuenow', '50')
     expect(screen.getByText((_content, element) => element?.textContent === '12 B / 24 B')).toBeInTheDocument()
     expect(screen.getAllByText('12 B').length).toBeGreaterThanOrEqual(1)
     expect(screen.getAllByText('sha-current').length).toBeGreaterThanOrEqual(1)
     expect(screen.getByText('2026-07-07')).toBeInTheDocument()
 
-    await userEvent.click(screen.getByRole('button', {name: /download current/i}))
-    await userEvent.click(screen.getByRole('button', {name: /download backup 2026-07-07/i}))
+    await userEvent.click(screen.getByRole('button', {name: /(download current|下载当前文件)/i}))
+    await userEvent.click(screen.getByRole('button', {name: /(download backup 2026-07-07|下载 2026-07-07 的备份)/i}))
 
     expectFetchCalled('/account/profiles/9/persistent/current/download')
     expectFetchCalled('/account/profiles/9/persistent/backups/5/download')
@@ -943,7 +943,7 @@ describe('App', () => {
 
     await expect(screen.findByRole('heading', {level: 1, name: 'Fresh profile'})).resolves.toBeInTheDocument()
     expect(screen.getByText('maspk_empty')).toBeInTheDocument()
-    expect(screen.getByText(/no current persistent/i)).toBeInTheDocument()
+    expect(screen.getByText(/(no current persistent|没有当前 persistent)/i)).toBeInTheDocument()
     expect(screen.queryByText(/could not load this profile/i)).not.toBeInTheDocument()
   })
 
@@ -965,7 +965,7 @@ describe('App', () => {
       </MemoryRouter>,
     )
 
-    await expect(screen.findByText(/profile was not found for your account/i)).resolves.toBeInTheDocument()
+    await expect(screen.findByText(/你的账户下没有这个 Profile/i)).resolves.toBeInTheDocument()
     expect(screen.queryByText(/could not load this profile/i)).not.toBeInTheDocument()
   })
 
