@@ -59,7 +59,11 @@ def test_profile_key_setup_requests_immediate_upload_after_cloud_sync():
 
     assert "def mas_unisync_startup_sync(force=False, raise_on_failure=False, upload_after_sync=False):" in hooks_source
     assert "mas_unisync_session.start(upload_after_sync=upload_after_sync)" in hooks_source
-    assert header_source.count("upload_after_sync=True") == 2
+    assert header_source.count("upload_after_sync=True") == 1
+    assert "def mas_unisync_bootstrap_setup" in header_source
+    assert "show_screen" in header_source
+    assert "dialog" in header_source
+    assert "renpy.quit" in header_source
 
 
 def test_settings_panel_exposes_manual_upload_button():

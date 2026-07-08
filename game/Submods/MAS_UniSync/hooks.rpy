@@ -216,6 +216,9 @@ init -968 python:
 init python:
     @store.mas_submod_utils.functionplugin("_quit", priority=-100)
     def mas_unisync_on_quit():
+        if mas_unisync_session is None:
+            renpy.persistent.save()
+            return
         try:
             renpy.persistent.save()
             mas_unisync_shutdown()

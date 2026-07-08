@@ -98,6 +98,35 @@ init -989 python:
         renpy.notify(_("MAS UniSync API URL saved"))
         renpy.restart_interaction()
 
+    def mas_unisync_bootstrap_setup():
+        """Set profile key: upload immediately if no remote current, otherwise prompt restart."""
+        session = mas_unisync_make_session()
+        try:
+            session.resolve_profile()
+            session.acquire_lock()
+        except Exception:
+            try:
+                session.release()
+            except Exception:
+                pass
+            raise
+
+        try:
+            current_meta = session.current_metadata()
+        finally:
+            session.release()
+
+        if current_meta is None:
+            mas_unisync_startup_sync(force=True, raise_on_failure=True, upload_after_sync=True)
+        else:
+            global mas_unisync_session
+            mas_unisync_session = None
+            renpy.show_screen(
+                "dialog",
+                message=_("MAS UniSync detected existing cloud data.\nPlease restart the game to sync."),
+                ok_action=Function(renpy.quit, relaunch=False),
+            )
+
     def mas_unisync_paste_profile_key():
         value = mas_unisync_clipboard_text()
         if not value:
@@ -105,7 +134,7 @@ init -989 python:
             return
         mas_unisync_save_key(mas_unisync_core.PROFILE_KEY_FEATURE, value)
         try:
-            mas_unisync_startup_sync(force=True, raise_on_failure=True, upload_after_sync=True)
+            mas_unisync_bootstrap_setup()
             renpy.notify(_("MAS UniSync profile key saved"))
         except Exception as exc:
             mas_unisync_update_status(message=str(exc))
@@ -151,7 +180,7 @@ init -989 python:
             mas_unisync_update_status(message="")
             return True, ""
         try:
-            mas_unisync_startup_sync(force=True, raise_on_failure=True, upload_after_sync=True)
+            mas_unisync_bootstrap_setup()
             return True, ""
         except Exception as exc:
             return False, str(exc)
