@@ -277,6 +277,8 @@ describe('App', () => {
     )
 
     await expect(screen.findByText('Backend API URL')).resolves.toBeInTheDocument()
+    expect(screen.queryByText('将这个链接填写至你的 API Key 界面的 MAS UniSync API URL。')).not.toBeInTheDocument()
+    await userEvent.hover(screen.getByRole('button', {name: 'Backend API URL 说明'}))
     expect(screen.getByText('将这个链接填写至你的 API Key 界面的 MAS UniSync API URL。')).toBeInTheDocument()
     expect(screen.getByText('https://api.example.test')).toBeInTheDocument()
   })

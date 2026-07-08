@@ -1,5 +1,5 @@
 import {Box, Button, Text} from '@primer/react'
-import {FileDirectoryIcon, KeyIcon, PlusIcon, SyncIcon, TrashIcon} from '@primer/octicons-react'
+import {FileDirectoryIcon, KeyIcon, PlusIcon, QuestionIcon, SyncIcon, TrashIcon} from '@primer/octicons-react'
 import {useEffect, useMemo, useState} from 'react'
 import {useTranslation} from 'react-i18next'
 import {Link} from 'react-router-dom'
@@ -26,6 +26,7 @@ export function ProfileKeysPage() {
   const [createName, setCreateName] = useState('')
   const [backendApiUrl, setBackendApiUrl] = useState('')
   const [pendingAction, setPendingAction] = useState<PendingAction>(null)
+  const [isBackendHelpVisible, setIsBackendHelpVisible] = useState(false)
   const [isBusy, setIsBusy] = useState(false)
 
   useEffect(() => {
@@ -134,12 +135,30 @@ export function ProfileKeysPage() {
 
       {backendApiUrl ? (
         <Box className="panel compact-panel">
-          <Text as="h2" sx={{fontSize: 2, mt: 0}}>
-            {t('account.profileKeys.backendApiUrl')}
-          </Text>
-          <Text as="p" sx={{color: 'fg.muted', mt: 1, mb: 2}}>
-            {t('account.profileKeys.backendApiUrlHelp')}
-          </Text>
+          <Box className="help-heading">
+            <Text as="h2" sx={{fontSize: 2, m: 0}}>
+              {t('account.profileKeys.backendApiUrl')}
+            </Text>
+            <Box className="inline-help">
+              <button
+                type="button"
+                className="inline-help-trigger"
+                aria-label={t('account.profileKeys.backendApiUrlHelpLabel')}
+                aria-describedby={isBackendHelpVisible ? 'backend-api-url-help' : undefined}
+                onMouseEnter={() => setIsBackendHelpVisible(true)}
+                onMouseLeave={() => setIsBackendHelpVisible(false)}
+                onFocus={() => setIsBackendHelpVisible(true)}
+                onBlur={() => setIsBackendHelpVisible(false)}
+              >
+                <QuestionIcon size={14} />
+              </button>
+              {isBackendHelpVisible ? (
+                <span id="backend-api-url-help" role="tooltip" className="inline-help-tooltip">
+                  {t('account.profileKeys.backendApiUrlHelp')}
+                </span>
+              ) : null}
+            </Box>
+          </Box>
           <CopyableSecret value={backendApiUrl} copyLabel={t('account.profileKeys.copyBackendApiUrl')} />
         </Box>
       ) : null}

@@ -152,6 +152,58 @@ input:focus-visible {
   gap: 2px;
 }
 
+.help-heading {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  margin-bottom: 8px;
+}
+
+.inline-help {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+}
+
+.inline-help-trigger {
+  width: 20px;
+  height: 20px;
+  display: inline-grid;
+  place-items: center;
+  padding: 0;
+  color: var(--fgColor-muted, #656d76);
+  background: var(--bgColor-muted, #f6f8fa);
+  border: 1px solid var(--borderColor-default, #d0d7de);
+  border-radius: 50%;
+  cursor: help;
+}
+
+.inline-help-trigger:hover,
+.inline-help-trigger:focus-visible {
+  color: var(--fgColor-accent, #0969da);
+  border-color: var(--borderColor-accent-muted, #54aeff66);
+  outline: none;
+}
+
+.inline-help-tooltip {
+  position: absolute;
+  left: 26px;
+  top: 50%;
+  z-index: 30;
+  width: max-content;
+  max-width: 320px;
+  padding: 6px 8px;
+  color: var(--fgColor-muted, #656d76);
+  font-size: 12px;
+  line-height: 1.45;
+  white-space: normal;
+  background: var(--bgColor-default, #fff);
+  border: 1px solid var(--borderColor-default, #d0d7de);
+  border-radius: 6px;
+  box-shadow: 0 8px 24px rgba(31, 35, 40, 0.12);
+  transform: translateY(-50%);
+}
+
 .login-language {
   position: absolute;
   top: 16px;
