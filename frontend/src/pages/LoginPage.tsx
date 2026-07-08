@@ -1,11 +1,13 @@
 import {Box, Button, Text} from '@primer/react'
 import {DatabaseIcon} from '@primer/octicons-react'
 import {useState} from 'react'
+import {useTranslation} from 'react-i18next'
 import {ApiError} from '../api/client'
 import {useAuth} from '../auth/AuthProvider'
 import {ErrorBanner} from '../components/ErrorBanner'
 
 export function LoginPage() {
+  const {t} = useTranslation()
   const {login} = useAuth()
   const [identification, setIdentification] = useState('')
   const [password, setPassword] = useState('')
@@ -20,9 +22,9 @@ export function LoginPage() {
       await login(identification, password)
     } catch (caught) {
       if (caught instanceof ApiError && caught.status === 401) {
-        setError('Flarum credentials are invalid.')
+        setError(t('login.invalidCredentials'))
       } else {
-        setError('Unable to sign in. Please try again.')
+        setError(t('login.genericError'))
       }
     } finally {
       setIsSubmitting(false)
@@ -41,20 +43,20 @@ export function LoginPage() {
           </Text>
         </Box>
         <Text as="p" sx={{color: 'fg.muted', mt: 0, mb: 3}}>
-          Sign in with your Flarum account.
+          {t('login.intro')}
         </Text>
-        {error ? <ErrorBanner title="Sign in failed" message={error} /> : null}
+        {error ? <ErrorBanner title={t('login.failedTitle')} message={error} /> : null}
         <form onSubmit={handleSubmit} className="stack">
           <label className="field">
-            <span>Flarum account or email</span>
+            <span>{t('login.accountLabel')}</span>
             <input value={identification} onChange={(event) => setIdentification(event.target.value)} required autoComplete="username" />
           </label>
           <label className="field">
-            <span>Password</span>
+            <span>{t('login.passwordLabel')}</span>
             <input value={password} onChange={(event) => setPassword(event.target.value)} required type="password" autoComplete="current-password" />
           </label>
           <Button type="submit" variant="primary" disabled={isSubmitting || !identification || !password}>
-            Sign in
+            {t('login.submit')}
           </Button>
         </form>
       </Box>

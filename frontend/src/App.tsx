@@ -12,6 +12,7 @@ import {AdminProfileDetailPage} from './pages/admin/AdminProfileDetailPage'
 import {AdminSettingsPage} from './pages/admin/AdminSettingsPage'
 import {AdminUserDetailPage} from './pages/admin/AdminUserDetailPage'
 import {AdminUsersPage} from './pages/admin/AdminUsersPage'
+import './i18n'
 import './styles/github.css'
 
 export function App() {

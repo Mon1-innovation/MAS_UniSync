@@ -57,6 +57,18 @@ describe('App', () => {
     vi.unstubAllGlobals()
   })
 
+  it('uses Chinese as the default language', async () => {
+    mockFetch(() => json({detail: {code: 'not_found'}}, {status: 404}))
+
+    render(
+      <MemoryRouter initialEntries={['/login']}>
+        <App />
+      </MemoryRouter>,
+    )
+
+    expect(await screen.findByRole('button', {name: '登录'})).toBeInTheDocument()
+  })
+
   it('logs in and redirects users to profile keys', async () => {
     mockFetch((input, init) => {
       if (input === '/login/flarum' && init?.method === 'POST') {
@@ -74,9 +86,9 @@ describe('App', () => {
       </MemoryRouter>,
     )
 
-    await userEvent.type(screen.getByLabelText(/flarum account/i), 'player')
-    await userEvent.type(screen.getByLabelText(/password/i), 'secret')
-    await userEvent.click(screen.getByRole('button', {name: /sign in/i}))
+    await userEvent.type(screen.getByLabelText(/flarum 账号或邮箱/i), 'player')
+    await userEvent.type(screen.getByLabelText(/密码/i), 'secret')
+    await userEvent.click(screen.getByRole('button', {name: /登录/i}))
 
     await expect(screen.findByRole('heading', {level: 1, name: /profile keys/i})).resolves.toBeInTheDocument()
     expect(JSON.parse(localStorage.getItem('mas_unisync_user') || '{}')).toMatchObject({username: 'player'})
@@ -96,11 +108,11 @@ describe('App', () => {
       </MemoryRouter>,
     )
 
-    await userEvent.type(screen.getByLabelText(/flarum account/i), 'player')
-    await userEvent.type(screen.getByLabelText(/password/i), 'bad')
-    await userEvent.click(screen.getByRole('button', {name: /sign in/i}))
+    await userEvent.type(screen.getByLabelText(/flarum 账号或邮箱/i), 'player')
+    await userEvent.type(screen.getByLabelText(/密码/i), 'bad')
+    await userEvent.click(screen.getByRole('button', {name: /登录/i}))
 
-    await expect(screen.findByText(/flarum credentials are invalid/i)).resolves.toBeInTheDocument()
+    await expect(screen.findByText(/flarum 凭据无效/i)).resolves.toBeInTheDocument()
   })
 
   it('hides admin navigation for non-admin users', async () => {
@@ -142,7 +154,7 @@ describe('App', () => {
 
     await userEvent.click(await screen.findByRole('button', {name: /sign out/i}))
 
-    await expect(screen.findByRole('button', {name: /sign in/i})).resolves.toBeInTheDocument()
+    await expect(screen.findByRole('button', {name: /登录/i})).resolves.toBeInTheDocument()
     expect(localStorage.getItem('mas_unisync_user')).toBeNull()
   })
 
