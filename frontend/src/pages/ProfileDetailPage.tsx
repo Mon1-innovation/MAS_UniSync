@@ -12,6 +12,7 @@ import {
   getAccountProfile,
   listAccountBackups,
   releaseAccountProfileLock,
+  restoreAccountBackup,
 } from '../api/profileKeysApi'
 import type {Backup, Profile, Version} from '../api/types'
 import {ByteSize} from '../components/ByteSize'
@@ -91,6 +92,19 @@ export function ProfileDetailPage() {
       saveBlob(await downloadAccountBackupPersistent(profile.id, backup.id), `profile-${profile.id}-backup-${backup.id}.bin`)
     } finally {
       setDownloadingId(null)
+    }
+  }
+
+  async function handleRestoreBackup(backup: Backup) {
+    if (!profile) return
+    setIsBusy(true)
+    setError(null)
+    try {
+      setCurrent(await restoreAccountBackup(profile.id, backup.id))
+    } catch {
+      setError(t('account.profileDetail.restoreError'))
+    } finally {
+      setIsBusy(false)
     }
   }
 
@@ -228,16 +242,28 @@ export function ProfileDetailPage() {
                         <RelativeTime value={backup.created_at} />
                       </td>
                       <td>
-                        <Button
-                          type="button"
-                          size="small"
-                          leadingVisual={DownloadIcon}
-                          aria-label={t('account.profileDetail.downloadBackup', {date: backup.backup_date})}
-                          onClick={() => handleDownloadBackup(backup)}
-                          disabled={downloadingId === backup.id}
-                        >
-                          {t('account.profileDetail.download')}
-                        </Button>
+                        <Box sx={{display: 'flex', gap: 2, flexWrap: 'wrap'}}>
+                          <Button
+                            type="button"
+                            size="small"
+                            leadingVisual={DownloadIcon}
+                            aria-label={t('account.profileDetail.downloadBackup', {date: backup.backup_date})}
+                            onClick={() => handleDownloadBackup(backup)}
+                            disabled={downloadingId === backup.id}
+                          >
+                            {t('account.profileDetail.download')}
+                          </Button>
+                          <Button
+                            type="button"
+                            size="small"
+                            variant="danger"
+                            aria-label={t('account.profileDetail.restoreBackup', {date: backup.backup_date})}
+                            onClick={() => handleRestoreBackup(backup)}
+                            disabled={isBusy}
+                          >
+                            {t('account.profileDetail.restore')}
+                          </Button>
+                        </Box>
                       </td>
                     </tr>
                   ))}

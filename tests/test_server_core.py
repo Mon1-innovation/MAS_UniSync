@@ -356,6 +356,12 @@ def test_account_profile_detail_exposes_owned_persistent_files(client):
     assert backup_download.status_code == 200
     assert backup_download.content == b"first"
 
+    restored = client.post(f"/account/profiles/{profile['id']}/persistent/backups/{items[-1]['id']}/restore")
+    assert restored.status_code == 200
+    assert restored.json()["sha256"] == first.json()["sha256"]
+    restored_download = client.get(f"/account/profiles/{profile['id']}/persistent/current/download")
+    assert restored_download.content == b"first"
+
 
 def test_account_profile_detail_reports_current_lock_status(client):
     profile = new_profile(client)

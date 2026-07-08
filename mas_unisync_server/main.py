@@ -270,6 +270,20 @@ def create_app(settings: Settings | None = None, flarum_client=None) -> FastAPI:
             media_type="application/octet-stream",
         )
 
+    @app.post("/account/profiles/{profile_id}/persistent/backups/{backup_id}/restore")
+    def account_restore_backup(
+        profile_id: int,
+        backup_id: int,
+        request: Request,
+        user: User = Depends(current_user),
+        db: Session = Depends(get_db),
+    ):
+        profile = owned_profile_or_404(db, profile_id, user)
+        version = restore_backup(db, profile.id, backup_id, request_now(request))
+        audit(db, request, user, "persistent.backup.restore", target_user_id=user.id, target_profile_id=profile.id)
+        db.commit()
+        return version_payload(version)
+
     def profile_from_header(request: Request, db: Session, profile_key: str | None) -> Profile:
         profile = get_profile_by_key(db, profile_key, request_now(request), check_ban=True)
         db.commit()

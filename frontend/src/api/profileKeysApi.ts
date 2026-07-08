@@ -47,3 +47,7 @@ export function downloadAccountCurrentPersistent(profileId: number) {
 export function downloadAccountBackupPersistent(profileId: number, backupId: number) {
   return downloadBlob(`/account/profiles/${profileId}/persistent/backups/${backupId}/download`)
 }
+
+export function restoreAccountBackup(profileId: number, backupId: number) {
+  return request<Version>(`/account/profiles/${profileId}/persistent/backups/${backupId}/restore`, {method: 'POST'})
+}

@@ -885,6 +885,17 @@ describe('App', () => {
       if (input === '/account/profiles/9/persistent/backups/5/download') {
         return blob('backup-bytes')
       }
+      if (input === '/account/profiles/9/persistent/backups/5/restore' && init?.method === 'POST') {
+        return json({
+          id: 33,
+          profile_id: 9,
+          sha256: 'sha-backup',
+          size: 12,
+          renpy_version: '8.2.3',
+          mas_version: '0.12.15',
+          created_at: '2026-07-07T09:00:00',
+        })
+      }
       return json({detail: {code: 'not_found'}}, {status: 404})
     })
 
@@ -918,10 +929,13 @@ describe('App', () => {
 
     await userEvent.click(screen.getByRole('button', {name: /(download current|下载当前文件)/i}))
     await userEvent.click(screen.getByRole('button', {name: /(download backup 2026-07-07|下载 2026-07-07 的备份)/i}))
+    await userEvent.click(screen.getByRole('button', {name: /(restore backup 2026-07-07|恢复 2026-07-07 的备份)/i}))
 
     expectFetchCalled('/account/profiles/9/lock/release', {method: 'POST'})
     expectFetchCalled('/account/profiles/9/persistent/current/download')
     expectFetchCalled('/account/profiles/9/persistent/backups/5/download')
+    expectFetchCalled('/account/profiles/9/persistent/backups/5/restore', {method: 'POST'})
+    await waitFor(() => expect(screen.getByText(/(version #33|版本 #33)/i)).toBeInTheDocument())
   })
 
   it('shows an empty current file state for profiles without persistent uploads', async () => {
