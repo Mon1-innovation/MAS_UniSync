@@ -225,6 +225,13 @@ def active_lock(db: Session, profile_id: int, now: datetime) -> Lock | None:
     return lock
 
 
+
+def cleanup_expired_locks(db: Session, now: datetime) -> int:
+    """Delete all lock rows whose expires_at is in the past. Returns count of removed rows."""
+    result = db.execute(delete(Lock).where(Lock.expires_at <= now))
+    db.commit()
+    return result.rowcount
+
 def require_lock(db: Session, profile_id: int, lease_token: str | None, now: datetime) -> Lock:
     if not lease_token:
         raise HTTPException(status_code=409, detail={"code": "invalid_lease"})
@@ -388,3 +395,4 @@ def active_ban_status(db: Session, user: User, now: datetime) -> bool:
         if ban_for_profile(db, profile, now):
             return True
     return False
+

@@ -1,8 +1,9 @@
 from __future__ import annotations
 
+import asyncio
 from datetime import timedelta
 
-from fastapi import Depends, FastAPI, File, Form, Header, HTTPException, Request, Response, UploadFile
+from fastapi import BackgroundTasks, Depends, FastAPI, File, Form, Header, HTTPException, Request, Response, UploadFile
 from fastapi.responses import StreamingResponse
 from sqlalchemy import desc, func, or_, select
 from sqlalchemy.orm import Session
@@ -19,6 +20,7 @@ from .services import (
     audit,
     aware,
     backup_payload,
+    cleanup_expired_locks,
     banned_exception,
     delete_profile_key as service_delete_profile_key,
     generate_profile_key,
@@ -32,6 +34,7 @@ from .services import (
     store_upload,
     upsert_flarum_user,
     user_payload,
+    utc_now,
     user_storage_usage,
     version_payload,
 )
@@ -47,6 +50,10 @@ def create_app(settings: Settings | None = None, flarum_client=None) -> FastAPI:
     Base.metadata.create_all(engine)
     SessionLocal = make_sessionmaker(engine)
     storage = LocalObjectStorage(settings.object_storage_path)
+
+    
+
+    
 
     app = FastAPI(title="MAS UniSync Server")
     app.add_middleware(SessionMiddleware, secret_key=settings.session_secret, same_site="lax")
@@ -234,6 +241,7 @@ def create_app(settings: Settings | None = None, flarum_client=None) -> FastAPI:
         now = request_now(request)
         profile = get_profile_by_key(db, profile_key, now)
         settings = request.app.state.settings
+        cleanup_expired_locks(db, now)
         existing = db.scalar(select(Lock).where(Lock.profile_id == profile.id))
         if existing and aware(existing.expires_at) > now:
             raise HTTPException(status_code=409, detail={"code": "lock_held"})
@@ -606,7 +614,21 @@ def create_app(settings: Settings | None = None, flarum_client=None) -> FastAPI:
             ]
         }
 
+
     return app
 
 
 app = create_app
+
+
+
+
+
+
+
+
+
+
+
+
+
