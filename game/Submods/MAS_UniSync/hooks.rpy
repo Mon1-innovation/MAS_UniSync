@@ -60,6 +60,7 @@ init -968 python:
             persistent._mas_moni_chksum = MAS_UNISYNC_LOCK_NOT_HELD_CHKSUM
         except Exception:
             pass
+        mas_override_label("mas_dockstat_found_monika", "mas_unisync_empty_return")
         mas_unisync_status["sync_status"] = "disabled"
         mas_unisync_status["lock_state"] = "not_held"
         mas_unisync_status["last_error"] = mas_unisync_core.renpy_safe_text(message)
@@ -377,3 +378,8 @@ init python:
                 "MAS UniSync final upload failed: {0}\n"
                 "Please manually back up your local persistent file before troubleshooting or using another client.".format(exc)
             )
+
+label mas_unisync_empty_return:
+    while True:
+        pause 1.0
+    return

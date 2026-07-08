@@ -18,10 +18,11 @@ except NameError:
     long = int
 
 
-PRIMITIVE_TYPES = (type(None), str, unicode, bool, int, long, float)
+PRIMITIVE_TYPES = (type(None), str, unicode, bool, int, long, float, bytes)
 DATE_TYPES = (datetime.date, datetime.timedelta)
 TIME_TYPES = (datetime.datetime, datetime.time)
 OPAQUE_TYPE_NAMES = ("Preferences", "Persistent", "MASAudioData")
+BUILTIN_CLASS_MODULES = ("builtins", "__builtin__")
 
 
 def _type_name(value):
@@ -29,7 +30,13 @@ def _type_name(value):
 
 
 def _module_name(value):
+    if isinstance(value, type):
+        return getattr(value, "__module__", "") or ""
     return getattr(type(value), "__module__", "") or ""
+
+
+def _is_builtin_class(value):
+    return isinstance(value, type) and _module_name(value) in BUILTIN_CLASS_MODULES
 
 
 def _text(value):
@@ -135,6 +142,8 @@ def _find_value_issues(value, depth, seen, top_key, path, issues):
     value_type = type(value)
     if value_type in PRIMITIVE_TYPES:
         return
+    if _is_builtin_class(value):
+        return
     if value_type in DATE_TYPES:
         return
     if value_type in TIME_TYPES:
@@ -174,6 +183,8 @@ def _validate_value(value, depth, seen, path="value"):
         return False, "{0} exceeds recursion depth".format(path)
     value_type = type(value)
     if value_type in PRIMITIVE_TYPES:
+        return True, ""
+    if _is_builtin_class(value):
         return True, ""
     if value_type in DATE_TYPES:
         return True, ""

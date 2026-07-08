@@ -254,6 +254,25 @@ def test_persistent_guard_accepts_preferences_type():
     assert ok, reason
 
 
+def test_persistent_guard_accepts_builtin_classes_but_rejects_custom_classes():
+    guard = load_client_module("mas_unisync_guard")
+
+    class CustomClass:
+        pass
+
+    ok, reason = guard.validate_persistent_dict({"builtins": [str, dict, object]})
+    assert ok, reason
+
+    ok, reason = guard.validate_persistent_dict({"custom": CustomClass})
+    assert ok is False
+    assert "custom" in reason
+
+    issues = guard.find_persistent_issues({"builtins": str, "custom": CustomClass})
+    assert [issue["path"] for issue in issues] == ["custom"]
+    assert issues[0]["type_name"] == "type"
+    assert issues[0]["module_name"] == __name__
+
+
 def test_persistent_guard_accepts_safe_types_and_rejects_custom_instances():
     guard = load_client_module("mas_unisync_guard")
 

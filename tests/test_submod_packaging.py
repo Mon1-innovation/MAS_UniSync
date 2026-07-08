@@ -218,15 +218,30 @@ def test_persistent_guard_screens_and_settings_entry_exist():
     header_source = Path("game/Submods/MAS_UniSync/header.rpy").read_text(
         encoding="utf-8"
     )
+    detail_source = header_source.split(
+        "screen mas_unisync_persistent_guard_detail():", 1
+    )[1].split(
+        "screen mas_unisync_lock_not_held_warning():", 1
+    )[0]
 
     assert "mas_unisync_guard_state = {" in header_source
     assert "default mas_unisync_guard_help_expanded = set()" in header_source
     assert "screen mas_unisync_persistent_guard_warning():" in header_source
     assert "screen mas_unisync_persistent_guard_detail():" in header_source
+    assert "screen mas_unisync_persistent_guard_delete_confirm(top_key):" in header_source
     assert "当前 persistent 无法保存" in header_source
     assert "带有这些 class 的 persistent 可能无法在其他客户端运行" in header_source
+    assert "除非你知道某个属性的作用，否则切勿删除" in header_source
+    assert "请询问技术人员" in header_source
     assert "Function(mas_unisync_delete_persistent_guard_issue" in header_source
     assert "查看 persistent 非标准 class" in header_source
+    assert 'Show("mas_unisync_persistent_guard_delete_confirm"' in detail_source
+    delete_button_source = detail_source.split('textbutton _("删除该 persistent 属性"):', 1)[1].split(
+        'if _index in mas_unisync_guard_help_expanded:', 1
+    )[0]
+    assert "Function(mas_unisync_delete_persistent_guard_issue" not in delete_button_source
+    assert detail_source.count("xalign 0.0") >= 6
+    assert detail_source.count("text_align 0.0") >= 6
 
 
 def test_lock_not_held_mode_blocks_save_upload_and_shows_quit_prompt():

@@ -304,9 +304,11 @@ screen mas_unisync_persistent_guard_detail():
                 text _("未检测到非标准 class。"):
                     style "main_menu_version"
             else:
-                text _("当前 persistent 无法保存，因为包含非标准 class。带有这些 class 的 persistent 可能无法在其他客户端运行。"):
+                text _("当前 persistent 无法保存，因为包含非标准 class。带有这些 class 的 persistent 可能无法在其他客户端运行。除非你知道某个属性的作用，否则切勿删除；不确定时请询问技术人员。"):
                     style "main_menu_version"
                     size 16
+                    xalign 0.0
+                    text_align 0.0
                 viewport:
                     mousewheel True
                     draggable True
@@ -322,18 +324,28 @@ screen mas_unisync_persistent_guard_detail():
                                     text _("属性名：") + mas_unisync_core.renpy_display_text(_issue.get("top_key", "")):
                                         style "main_menu_version"
                                         size 16
+                                        xalign 0.0
+                                        text_align 0.0
                                     text _("完整路径：") + mas_unisync_core.renpy_display_text(_issue.get("path", "")):
                                         style "main_menu_version"
                                         size 16
+                                        xalign 0.0
+                                        text_align 0.0
                                     text _("class：") + mas_unisync_core.renpy_display_text(_issue.get("type_name", "")):
                                         style "main_menu_version"
                                         size 16
+                                        xalign 0.0
+                                        text_align 0.0
                                     text _("module：") + mas_unisync_core.renpy_display_text(_issue.get("module_name", "")):
                                         style "main_menu_version"
                                         size 16
+                                        xalign 0.0
+                                        text_align 0.0
                                     text _("repr：") + mas_unisync_core.renpy_display_text(_issue.get("repr_text", "")):
                                         style "main_menu_version"
                                         size 16
+                                        xalign 0.0
+                                        text_align 0.0
                                     hbox:
                                         spacing 10
                                         textbutton _("展开/收起 help()"):
@@ -341,11 +353,13 @@ screen mas_unisync_persistent_guard_detail():
                                             action Function(mas_unisync_toggle_guard_help, _index)
                                         textbutton _("删除该 persistent 属性"):
                                             style "mas_button_simple"
-                                            action Function(mas_unisync_delete_persistent_guard_issue, _issue.get("top_key", ""))
+                                            action Show("mas_unisync_persistent_guard_delete_confirm", top_key=_issue.get("top_key", ""))
                                     if _index in mas_unisync_guard_help_expanded:
                                         text mas_unisync_core.renpy_display_text(_issue.get("help_text", "") or _("没有 help() 内容。")):
                                             style "main_menu_version"
                                             size 12
+                                            xalign 0.0
+                                            text_align 0.0
             hbox:
                 spacing 10
                 textbutton _("刷新"):
@@ -354,6 +368,36 @@ screen mas_unisync_persistent_guard_detail():
                 textbutton _("关闭"):
                     style "mas_button_simple"
                     action Hide("mas_unisync_persistent_guard_detail")
+
+screen mas_unisync_persistent_guard_delete_confirm(top_key):
+    zorder 202
+    modal True
+    frame:
+        align (0.5, 0.5)
+        xmaximum 560
+        padding (18, 16)
+        vbox:
+            spacing 10
+            text _("确认删除 persistent 属性？"):
+                style "main_menu_version"
+            text _("除非你知道该属性的作用，否则切勿删除；不确定时请询问技术人员。"):
+                style "main_menu_version"
+                size 16
+                xalign 0.0
+                text_align 0.0
+            text _("属性名：") + mas_unisync_core.renpy_display_text(top_key):
+                style "main_menu_version"
+                size 16
+                xalign 0.0
+                text_align 0.0
+            hbox:
+                spacing 10
+                textbutton _("确认删除"):
+                    style "mas_button_simple"
+                    action [Function(mas_unisync_delete_persistent_guard_issue, top_key), Hide("mas_unisync_persistent_guard_delete_confirm")]
+                textbutton _("取消"):
+                    style "mas_button_simple"
+                    action Hide("mas_unisync_persistent_guard_delete_confirm")
 
 screen mas_unisync_lock_not_held_warning():
     zorder 220
