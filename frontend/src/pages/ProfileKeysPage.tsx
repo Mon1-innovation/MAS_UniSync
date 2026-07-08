@@ -137,6 +137,9 @@ export function ProfileKeysPage() {
           <Text as="h2" sx={{fontSize: 2, mt: 0}}>
             {t('account.profileKeys.backendApiUrl')}
           </Text>
+          <Text as="p" sx={{color: 'fg.muted', mt: 1, mb: 2}}>
+            {t('account.profileKeys.backendApiUrlHelp')}
+          </Text>
           <CopyableSecret value={backendApiUrl} copyLabel={t('account.profileKeys.copyBackendApiUrl')} />
         </Box>
       ) : null}
