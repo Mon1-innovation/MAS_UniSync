@@ -26,6 +26,7 @@ MAS_UniSync
 - 使用 Profile Lock 避免同一个同步档案被多个客户端同时写入。
 - 服务端保留每日备份。
 - 管理员可以查看用户、档案、备份和审计日志，也可以封禁用户、Profile 或 Key。
+- 管理员可以在设置中管理 persistent 对象存储桶，默认使用 Docker 本地存储，也可以添加 WebDAV 存储桶。
 
 ## 快速部署
 
@@ -134,6 +135,16 @@ http://127.0.0.1:5173
 | `ADMIN_FLARUM_GROUP_IDS` | 映射为管理员的 Flarum group id。 |
 | `ADMIN_FLARUM_GROUP_NAMES` | 映射为管理员的 Flarum group name。 |
 | `LOCK_TTL_SECONDS` | Profile Lock 过期时间，单位秒。 |
+
+## 对象存储桶
+
+服务端默认创建一个本地存储桶，路径来自 `OBJECT_STORAGE_PATH`。Docker Compose 默认把它挂载到 `object_data` volume，因此不额外配置时仍然使用本地持久化存储。
+
+管理员可以在后台设置页添加 WebDAV 存储桶并选择活动存储桶。切换活动存储桶只影响新的上传；已有 `persistent` 版本和每日备份会继续从原存储桶读取，不会自动迁移。
+
+WebDAV 密码会保存到后端数据库，但后台设置接口不会回显明文密码；编辑 WebDAV 存储桶时密码留空表示保持原密码。
+
+如果是在已有生产数据库上升级，需要确保 `persistent_versions` 表包含 nullable `bucket_id` 列，并创建 `storage_buckets` 表。当前服务启动会为缺失的 `bucket_id` 做轻量补列，新表由 SQLAlchemy `create_all` 创建。
 
 ## 测试
 

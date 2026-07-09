@@ -5,7 +5,7 @@ from datetime import timedelta
 
 from fastapi import BackgroundTasks, Depends, FastAPI, File, Form, Header, HTTPException, Request, Response, UploadFile
 from fastapi.responses import StreamingResponse
-from sqlalchemy import desc, func, or_, select
+from sqlalchemy import desc, func, inspect, or_, select, text
 from sqlalchemy.orm import Session
 from starlette.middleware.sessions import SessionMiddleware
 
@@ -23,9 +23,12 @@ from .services import (
     cleanup_expired_locks,
     banned_exception,
     active_profile_count_for_user,
+    delete_storage_bucket,
     delete_profile_key as service_delete_profile_key,
+    ensure_default_storage_bucket,
     generate_profile_key,
     get_profile_by_key,
+    get_version_bytes,
     max_active_profiles_per_account,
     profile_payload,
     profile_storage_limit_bytes,
@@ -49,13 +52,27 @@ from .settings import Settings
 from .storage import LocalObjectStorage
 
 
+def ensure_storage_schema(engine) -> None:
+    inspector = inspect(engine)
+    if "persistent_versions" not in inspector.get_table_names():
+        return
+    columns = {column["name"] for column in inspector.get_columns("persistent_versions")}
+    if "bucket_id" not in columns:
+        with engine.begin() as connection:
+            connection.execute(text("ALTER TABLE persistent_versions ADD COLUMN bucket_id INTEGER"))
+
+
 def create_app(settings: Settings | None = None, flarum_client=None) -> FastAPI:
     settings = settings or Settings()
     flarum_client = flarum_client or FlarumClient(settings.flarum_url)
     engine = make_engine(settings.database_url)
     Base.metadata.create_all(engine)
+    ensure_storage_schema(engine)
     SessionLocal = make_sessionmaker(engine)
     storage = LocalObjectStorage(settings.object_storage_path)
+    with SessionLocal() as db:
+        ensure_default_storage_bucket(db, settings)
+        db.commit()
 
     
 
@@ -186,7 +203,7 @@ def create_app(settings: Settings | None = None, flarum_client=None) -> FastAPI:
             raise HTTPException(status_code=404, detail={"code": "profile_not_found"})
         service_delete_profile_key(
             db,
-            request.app.state.storage,
+            request.app.state.settings,
             request,
             user,
             profile,
@@ -237,7 +254,7 @@ def create_app(settings: Settings | None = None, flarum_client=None) -> FastAPI:
         profile = owned_profile_or_404(db, profile_id, user)
         version = require_current_version(db, profile.id)
         return StreamingResponse(
-            iter([request.app.state.storage.get(version.object_path)]),
+            iter([get_version_bytes(db, request.app.state.settings, version)]),
             media_type="application/octet-stream",
         )
 
@@ -266,7 +283,7 @@ def create_app(settings: Settings | None = None, flarum_client=None) -> FastAPI:
             raise HTTPException(status_code=404, detail={"code": "backup_not_found"})
         version = db.get(PersistentVersion, backup.version_id)
         return StreamingResponse(
-            iter([request.app.state.storage.get(version.object_path)]),
+            iter([get_version_bytes(db, request.app.state.settings, version)]),
             media_type="application/octet-stream",
         )
 
@@ -384,7 +401,7 @@ def create_app(settings: Settings | None = None, flarum_client=None) -> FastAPI:
         projected_usage = projected_profile_storage_usage(db, profile.id, now.date(), len(data))
         if projected_usage > profile_storage_limit_bytes(db):
             raise HTTPException(status_code=413, detail={"code": "profile_storage_limit_exceeded"})
-        version = store_upload(db, request.app.state.storage, profile, data, renpy_version, mas_version, now)
+        version = store_upload(db, request.app.state.settings, profile, data, renpy_version, mas_version, now)
         db.commit()
         return version_payload(version)
 
@@ -397,7 +414,7 @@ def create_app(settings: Settings | None = None, flarum_client=None) -> FastAPI:
         profile = profile_from_header(request, db, profile_key)
         version = require_current_version(db, profile.id)
         return StreamingResponse(
-            iter([request.app.state.storage.get(version.object_path)]),
+            iter([get_version_bytes(db, request.app.state.settings, version)]),
             media_type="application/octet-stream",
         )
 
@@ -474,6 +491,18 @@ def create_app(settings: Settings | None = None, flarum_client=None) -> FastAPI:
         db.commit()
         return {"settings": settings_payload}
 
+    @app.delete("/admin/storage-buckets/{bucket_id}", status_code=204)
+    def admin_delete_storage_bucket(
+        bucket_id: int,
+        request: Request,
+        actor: User = Depends(admin_user),
+        db: Session = Depends(get_db),
+    ):
+        delete_storage_bucket(db, request.app.state.settings, bucket_id)
+        audit(db, request, actor, "admin.storage_bucket.delete")
+        db.commit()
+        return Response(status_code=204)
+
     @app.get("/admin/users/{user_id}")
     def admin_get_user(
         user_id: int,
@@ -519,7 +548,10 @@ def create_app(settings: Settings | None = None, flarum_client=None) -> FastAPI:
         version = require_current_version(db, profile.id)
         audit(db, request, actor, "admin.persistent.current.download", target_user_id=profile.user_id, target_profile_id=profile.id)
         db.commit()
-        return StreamingResponse(iter([request.app.state.storage.get(version.object_path)]), media_type="application/octet-stream")
+        return StreamingResponse(
+            iter([get_version_bytes(db, request.app.state.settings, version)]),
+            media_type="application/octet-stream",
+        )
 
     @app.get("/admin/profiles/{profile_id}/persistent/backups")
     def admin_list_backups(profile_id: int, _: User = Depends(admin_user), db: Session = Depends(get_db)):
@@ -551,7 +583,10 @@ def create_app(settings: Settings | None = None, flarum_client=None) -> FastAPI:
         version = db.get(PersistentVersion, backup.version_id)
         audit(db, request, actor, "admin.persistent.backup.download", target_user_id=profile.user_id, target_profile_id=profile.id)
         db.commit()
-        return StreamingResponse(iter([request.app.state.storage.get(version.object_path)]), media_type="application/octet-stream")
+        return StreamingResponse(
+            iter([get_version_bytes(db, request.app.state.settings, version)]),
+            media_type="application/octet-stream",
+        )
 
     @app.post("/admin/profiles/{profile_id}/persistent/backups/{backup_id}/restore")
     def admin_restore_backup(
@@ -660,7 +695,7 @@ def create_app(settings: Settings | None = None, flarum_client=None) -> FastAPI:
             raise HTTPException(status_code=404, detail={"code": "profile_not_found"})
         service_delete_profile_key(
             db,
-            request.app.state.storage,
+            request.app.state.settings,
             request,
             actor,
             profile,

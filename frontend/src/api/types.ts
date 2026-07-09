@@ -94,10 +94,29 @@ export interface SystemSettings {
   frontend_web_url: string
   profile_storage_limit_bytes: number
   max_active_profiles_per_account: number
+  active_storage_bucket_id: number | null
+  storage_buckets: StorageBucket[]
 }
 
 export interface SystemSettingsResponse {
   settings: SystemSettings
+}
+
+export type StorageBucketType = 'local' | 'webdav'
+
+export interface StorageBucket {
+  id?: number
+  name: string
+  type: StorageBucketType
+  is_active: boolean
+  config: {
+    path?: string
+    base_url?: string
+    username?: string
+    password?: string
+    root_path?: string
+    has_password?: boolean
+  }
 }
 
 export interface PublicWebConfig {

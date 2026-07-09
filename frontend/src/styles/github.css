@@ -353,6 +353,7 @@ input:focus-visible {
 }
 
 .field input,
+.field select,
 .search-input {
   min-height: 36px;
   border: 1px solid var(--border);
@@ -369,12 +370,14 @@ input:focus-visible {
 }
 
 .field input:hover,
+.field select:hover,
 .search-input:hover {
   border-color: var(--border-strong);
   background: #fbfdff;
 }
 
 .field input:focus,
+.field select:focus,
 .search-input:focus {
   border-color: var(--brand);
 }
@@ -760,6 +763,116 @@ tbody tr:hover {
 .settings-form {
   display: grid;
   gap: 16px;
+}
+
+.settings-section {
+  display: grid;
+  gap: 14px;
+  padding-top: 8px;
+  border-top: 1px solid var(--border);
+}
+
+.settings-section-header {
+  display: flex;
+  gap: 16px;
+  align-items: start;
+  justify-content: space-between;
+  flex-wrap: wrap;
+}
+
+.settings-section-header h2 {
+  margin: 0;
+  font-size: 18px;
+}
+
+.settings-section-header p {
+  margin: 4px 0 0;
+  color: var(--muted);
+}
+
+.storage-bucket-list {
+  display: grid;
+  gap: 12px;
+}
+
+.storage-bucket-item {
+  display: grid;
+  gap: 12px;
+  padding: 14px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: #fbfdff;
+}
+
+.storage-bucket-title {
+  display: flex;
+  gap: 10px;
+  align-items: center;
+  flex-wrap: wrap;
+}
+
+.radio-row {
+  display: inline-flex;
+  gap: 8px;
+  align-items: center;
+  font-weight: 650;
+}
+
+.radio-row input {
+  width: 16px;
+  height: 16px;
+}
+
+.status-pill {
+  display: inline-flex;
+  align-items: center;
+  min-height: 22px;
+  padding: 2px 8px;
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 650;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  background: #fff;
+}
+
+.status-pill.is-active {
+  color: #0d6b4f;
+  border-color: #bfe8d8;
+  background: #eafaf4;
+}
+
+.storage-bucket-readonly {
+  display: grid;
+  gap: 6px;
+  color: var(--muted);
+  font-size: 13px;
+}
+
+.storage-bucket-readonly code {
+  padding: 8px 10px;
+  overflow-wrap: anywhere;
+  color: var(--text);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: #fff;
+}
+
+.storage-bucket-fields {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
+}
+
+.storage-bucket-actions {
+  display: flex;
+  align-items: end;
+}
+
+@media (max-width: 720px) {
+  .storage-bucket-fields {
+    grid-template-columns: 1fr;
+  }
 }
 
 .success-banner {

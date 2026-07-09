@@ -1041,6 +1041,13 @@ describe('App', () => {
   it('allows admins to edit runtime system settings', async () => {
     localStorage.setItem('mas_unisync_user', JSON.stringify(adminUser))
     let submittedBody: unknown
+    const defaultBucket = {
+      id: 1,
+      name: 'Docker local storage',
+      type: 'local',
+      is_active: true,
+      config: {path: './data/objects'},
+    }
     mockFetch((input, init) => {
       if (input === '/account/profile-keys') {
         return json({items: []})
@@ -1052,6 +1059,8 @@ describe('App', () => {
             frontend_web_url: 'https://portal.example.test',
             profile_storage_limit_bytes: 10485760,
             max_active_profiles_per_account: 3,
+            active_storage_bucket_id: 1,
+            storage_buckets: [defaultBucket],
           },
         })
       }
@@ -1063,6 +1072,8 @@ describe('App', () => {
             frontend_web_url: 'https://portal.example.test',
             profile_storage_limit_bytes: 20971520,
             max_active_profiles_per_account: 4,
+            active_storage_bucket_id: 1,
+            storage_buckets: [defaultBucket],
           },
         })
       }
@@ -1090,6 +1101,99 @@ describe('App', () => {
       frontend_web_url: 'https://portal.example.test',
       profile_storage_limit_bytes: 20971520,
       max_active_profiles_per_account: 4,
+      active_storage_bucket_id: 1,
+      storage_buckets: [defaultBucket],
     })
+  })
+
+  it('allows admins to add a webdav storage bucket and mark it active', async () => {
+    localStorage.setItem('mas_unisync_user', JSON.stringify(adminUser))
+    let submittedBody: any
+    const defaultBucket = {
+      id: 1,
+      name: 'Docker local storage',
+      type: 'local',
+      is_active: true,
+      config: {path: './data/objects'},
+    }
+    mockFetch((input, init) => {
+      if (input === '/account/profile-keys') {
+        return json({items: []})
+      }
+      if (input === '/admin/settings' && !init?.method) {
+        return json({
+          settings: {
+            backend_api_url: 'https://api.example.test',
+            frontend_web_url: 'https://portal.example.test',
+            profile_storage_limit_bytes: 10485760,
+            max_active_profiles_per_account: 3,
+            active_storage_bucket_id: 1,
+            storage_buckets: [defaultBucket],
+          },
+        })
+      }
+      if (input === '/admin/settings' && init?.method === 'PUT') {
+        submittedBody = JSON.parse(String(init.body))
+        return json({
+          settings: {
+            backend_api_url: 'https://api.example.test',
+            frontend_web_url: 'https://portal.example.test',
+            profile_storage_limit_bytes: 10485760,
+            max_active_profiles_per_account: 3,
+            active_storage_bucket_id: 2,
+            storage_buckets: [
+              {...defaultBucket, is_active: false},
+              {
+                id: 2,
+                name: 'Primary WebDAV',
+                type: 'webdav',
+                is_active: true,
+                config: {
+                  base_url: 'https://dav.example.test/root',
+                  username: 'mas',
+                  root_path: 'persistent',
+                  has_password: true,
+                },
+              },
+            ],
+          },
+        })
+      }
+      return json({detail: {code: 'not_found'}}, {status: 404})
+    })
+
+    render(
+      <MemoryRouter initialEntries={['/admin/settings']}>
+        <App />
+      </MemoryRouter>,
+    )
+
+    await screen.findByRole('heading', {level: 1, name: /(settings|设置)/i})
+    await userEvent.click(screen.getByRole('button', {name: /(add webdav bucket|添加 WebDAV 存储桶)/i}))
+    await userEvent.clear(screen.getByLabelText(/(bucket name|存储桶名称)/i))
+    await userEvent.type(screen.getByLabelText(/(bucket name|存储桶名称)/i), 'Primary WebDAV')
+    await userEvent.type(screen.getByLabelText(/(webdav url|WebDAV URL)/i), 'https://dav.example.test/root/')
+    await userEvent.type(screen.getByLabelText(/(webdav username|WebDAV 用户名)/i), 'mas')
+    await userEvent.type(screen.getByLabelText(/(webdav password|WebDAV 密码)/i), 'secret')
+    await userEvent.type(screen.getByLabelText(/(webdav root path|WebDAV 根路径)/i), 'persistent')
+    await userEvent.click(screen.getByLabelText(/(use Primary WebDAV as active storage bucket|使用 Primary WebDAV 作为活动存储桶)/i))
+    await userEvent.click(screen.getByRole('button', {name: /(save settings|保存设置)/i}))
+
+    await expect(screen.findByText(/(settings saved|设置已保存)/i)).resolves.toBeInTheDocument()
+    expect(submittedBody.storage_buckets).toEqual([
+      {...defaultBucket, is_active: false},
+      {
+        name: 'Primary WebDAV',
+        type: 'webdav',
+        is_active: true,
+        config: {
+          base_url: 'https://dav.example.test/root/',
+          username: 'mas',
+          password: 'secret',
+          root_path: 'persistent',
+        },
+      },
+    ])
+    expect(submittedBody.active_storage_bucket_id).toBeNull()
   })
 })

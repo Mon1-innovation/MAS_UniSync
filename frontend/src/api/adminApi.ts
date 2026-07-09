@@ -104,3 +104,7 @@ export function updateAdminSettings(settings: SystemSettings) {
     body: {...settings},
   })
 }
+
+export function deleteStorageBucket(bucketId: number) {
+  return request<void>(`/admin/storage-buckets/${bucketId}`, {method: 'DELETE'})
+}

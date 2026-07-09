@@ -7,7 +7,7 @@ from fastapi.testclient import TestClient
 from sqlalchemy import select
 
 from mas_unisync_server.main import create_app
-from mas_unisync_server.models import AuditLog, Ban, Lock, PersistentCurrent, PersistentDailyBackup, PersistentVersion, Profile
+from mas_unisync_server.models import AuditLog, Ban, Lock, PersistentCurrent, PersistentDailyBackup, PersistentVersion, Profile, StorageBucket
 from mas_unisync_server.settings import Settings
 
 
@@ -558,11 +558,22 @@ def test_admin_settings_default_from_origin_save_and_audit(client):
     defaults = client.get("/admin/settings", headers={"User-Agent": "pytest-agent"})
 
     assert defaults.status_code == 200
-    assert defaults.json()["settings"] == {
+    default_settings = defaults.json()["settings"]
+    assert default_settings == {
         "backend_api_url": "http://testserver",
         "frontend_web_url": "http://testserver",
         "profile_storage_limit_bytes": 10 * 1024 * 1024,
         "max_active_profiles_per_account": 3,
+        "active_storage_bucket_id": default_settings["storage_buckets"][0]["id"],
+        "storage_buckets": [
+            {
+                "id": default_settings["storage_buckets"][0]["id"],
+                "name": "Docker local storage",
+                "type": "local",
+                "is_active": True,
+                "config": {"path": str(client.app.state.settings.object_storage_path)},
+            }
+        ],
     }
 
     saved = client.put(
@@ -577,11 +588,14 @@ def test_admin_settings_default_from_origin_save_and_audit(client):
     )
 
     assert saved.status_code == 200
-    assert saved.json()["settings"] == {
+    saved_settings = saved.json()["settings"]
+    assert saved_settings == {
         "backend_api_url": "https://api.example.test/base",
         "frontend_web_url": "https://portal.example.test",
         "profile_storage_limit_bytes": 12345,
         "max_active_profiles_per_account": 7,
+        "active_storage_bucket_id": default_settings["storage_buckets"][0]["id"],
+        "storage_buckets": default_settings["storage_buckets"],
     }
     assert client.get("/admin/settings").json()["settings"]["backend_api_url"] == "https://api.example.test/base"
 
@@ -617,6 +631,191 @@ def test_admin_settings_reject_non_admin_and_invalid_values(client):
     )
 
     assert invalid.status_code == 422
+
+
+def test_admin_settings_manage_storage_buckets_and_active_local_uploads(client):
+    login(client, "admin@example.com")
+    settings = client.get("/admin/settings").json()["settings"]
+    default_bucket = settings["storage_buckets"][0]
+    secondary_root = client.app.state.settings.object_storage_path.parent / "secondary-objects"
+
+    created = client.put(
+        "/admin/settings",
+        json={
+            "backend_api_url": "",
+            "frontend_web_url": "",
+            "profile_storage_limit_bytes": 10 * 1024 * 1024,
+            "max_active_profiles_per_account": 3,
+            "storage_buckets": [
+                default_bucket,
+                {
+                    "name": "Secondary local storage",
+                    "type": "local",
+                    "config": {"path": str(secondary_root)},
+                },
+            ],
+        },
+    )
+    assert created.status_code == 200
+    secondary_bucket = next(
+        bucket for bucket in created.json()["settings"]["storage_buckets"] if bucket["name"] == "Secondary local storage"
+    )
+
+    activated = client.put(
+        "/admin/settings",
+        json={
+            "backend_api_url": "",
+            "frontend_web_url": "",
+            "profile_storage_limit_bytes": 10 * 1024 * 1024,
+            "max_active_profiles_per_account": 3,
+            "active_storage_bucket_id": secondary_bucket["id"],
+            "storage_buckets": created.json()["settings"]["storage_buckets"],
+        },
+    )
+    assert activated.status_code == 200
+    assert activated.json()["settings"]["active_storage_bucket_id"] == secondary_bucket["id"]
+
+    client.post("/logout")
+    profile = new_profile(client)
+    key = profile["profile_key"]
+    lease = acquire_lock(client, key)
+    uploaded = upload_persistent(client, key, lease, b"secondary")
+
+    assert uploaded.status_code == 201
+    with client.app.state.SessionLocal() as db:
+        version = db.scalar(select(PersistentVersion).where(PersistentVersion.profile_id == profile["id"]))
+        assert version.bucket_id == secondary_bucket["id"]
+        assert (secondary_root / version.object_path).exists()
+        assert not (client.app.state.storage.root / version.object_path).exists()
+    assert client.get("/v1/persistent/download", headers={"X-MAS-Profile-Key": key}).content == b"secondary"
+
+
+def test_legacy_versions_without_bucket_id_still_read_from_default_local_bucket(client):
+    profile = new_profile(client)
+    key = profile["profile_key"]
+    lease = acquire_lock(client, key)
+    uploaded = upload_persistent(client, key, lease, b"legacy")
+    assert uploaded.status_code == 201
+
+    with client.app.state.SessionLocal() as db:
+        version = db.scalar(select(PersistentVersion).where(PersistentVersion.profile_id == profile["id"]))
+        version.bucket_id = None
+        db.commit()
+
+    assert client.get("/v1/persistent/download", headers={"X-MAS-Profile-Key": key}).content == b"legacy"
+
+
+def test_admin_settings_masks_and_preserves_webdav_password(client):
+    login(client, "admin@example.com")
+    settings = client.get("/admin/settings").json()["settings"]
+    default_bucket = settings["storage_buckets"][0]
+
+    created = client.put(
+        "/admin/settings",
+        json={
+            "backend_api_url": "",
+            "frontend_web_url": "",
+            "profile_storage_limit_bytes": 10 * 1024 * 1024,
+            "max_active_profiles_per_account": 3,
+            "storage_buckets": [
+                default_bucket,
+                {
+                    "name": "WebDAV",
+                    "type": "webdav",
+                    "config": {
+                        "base_url": "https://dav.example.test/root/",
+                        "username": "mas",
+                        "password": "secret",
+                        "root_path": "persistent",
+                    },
+                },
+            ],
+        },
+    )
+
+    assert created.status_code == 200
+    webdav = next(bucket for bucket in created.json()["settings"]["storage_buckets"] if bucket["type"] == "webdav")
+    assert webdav["config"] == {
+        "base_url": "https://dav.example.test/root",
+        "username": "mas",
+        "root_path": "persistent",
+        "has_password": True,
+    }
+
+    preserved = client.put(
+        "/admin/settings",
+        json={
+            "backend_api_url": "",
+            "frontend_web_url": "",
+            "profile_storage_limit_bytes": 10 * 1024 * 1024,
+            "max_active_profiles_per_account": 3,
+            "storage_buckets": [
+                default_bucket,
+                {
+                    "id": webdav["id"],
+                    "name": "WebDAV renamed",
+                    "type": "webdav",
+                    "config": {
+                        "base_url": "https://dav.example.test/root/",
+                        "username": "mas",
+                        "password": "",
+                        "root_path": "persistent",
+                    },
+                },
+            ],
+        },
+    )
+
+    assert preserved.status_code == 200
+    with client.app.state.SessionLocal() as db:
+        bucket = db.get(StorageBucket, webdav["id"])
+        assert '"password": "secret"' in bucket.config_json
+    webdav_after = next(bucket for bucket in preserved.json()["settings"]["storage_buckets"] if bucket["id"] == webdav["id"])
+    assert webdav_after["name"] == "WebDAV renamed"
+    assert webdav_after["config"]["has_password"] is True
+    assert "password" not in webdav_after["config"]
+
+
+def test_admin_cannot_delete_referenced_or_default_storage_bucket(client):
+    profile = new_profile(client)
+    key = profile["profile_key"]
+    lease = acquire_lock(client, key)
+    assert upload_persistent(client, key, lease, b"referenced").status_code == 201
+
+    client.post("/logout")
+    login(client, "admin@example.com")
+    default_bucket = client.get("/admin/settings").json()["settings"]["storage_buckets"][0]
+
+    default_delete = client.delete(f"/admin/storage-buckets/{default_bucket['id']}")
+    assert default_delete.status_code == 409
+    assert default_delete.json()["detail"]["code"] == "storage_bucket_in_use"
+
+    settings = client.get("/admin/settings").json()["settings"]
+    orphan_root = client.app.state.settings.object_storage_path.parent / "orphan-objects"
+    created = client.put(
+        "/admin/settings",
+        json={
+            "backend_api_url": "",
+            "frontend_web_url": "",
+            "profile_storage_limit_bytes": 10 * 1024 * 1024,
+            "max_active_profiles_per_account": 3,
+            "storage_buckets": [
+                *settings["storage_buckets"],
+                {
+                    "name": "Orphan",
+                    "type": "local",
+                    "config": {"path": str(orphan_root)},
+                },
+            ],
+        },
+    )
+    orphan = next(bucket for bucket in created.json()["settings"]["storage_buckets"] if bucket["name"] == "Orphan")
+
+    deleted = client.delete(f"/admin/storage-buckets/{orphan['id']}")
+
+    assert deleted.status_code == 204
+    remaining_names = {bucket["name"] for bucket in client.get("/admin/settings").json()["settings"]["storage_buckets"]}
+    assert "Orphan" not in remaining_names
 
 
 def test_public_config_web_url_uses_saved_frontend_url_or_origin_fallback(client):

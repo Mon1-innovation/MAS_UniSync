@@ -4,6 +4,7 @@ import hashlib
 import json
 import secrets
 from datetime import date, datetime, timedelta, timezone
+from pathlib import Path
 
 from fastapi import HTTPException, Request
 from sqlalchemy import delete, desc, func, or_, select
@@ -17,11 +18,12 @@ from .models import (
     PersistentDailyBackup,
     PersistentVersion,
     Profile,
+    StorageBucket,
     SystemSetting,
     User,
 )
 from .settings import Settings
-from .storage import LocalObjectStorage
+from .storage import LocalObjectStorage, ObjectStorage, WebDavObjectStorage
 
 
 def utc_now() -> datetime:
@@ -61,6 +63,8 @@ SETTING_BACKEND_API_URL = "backend_api_url"
 SETTING_FRONTEND_WEB_URL = "frontend_web_url"
 SETTING_PROFILE_STORAGE_LIMIT_BYTES = "profile_storage_limit_bytes"
 SETTING_MAX_ACTIVE_PROFILES_PER_ACCOUNT = "max_active_profiles_per_account"
+SUPPORTED_STORAGE_BUCKET_TYPES = {"local", "webdav"}
+DEFAULT_LOCAL_BUCKET_NAME = "Docker local storage"
 
 
 def sanitize_version(value: str | None) -> str | None:
@@ -176,6 +180,156 @@ def normalize_url_setting(value: str | None) -> str:
     return (value or "").strip().rstrip("/")
 
 
+def normalize_storage_bucket_type(value: str) -> str:
+    bucket_type = value.strip().lower()
+    if bucket_type not in SUPPORTED_STORAGE_BUCKET_TYPES:
+        supported = ", ".join(sorted(SUPPORTED_STORAGE_BUCKET_TYPES))
+        raise HTTPException(status_code=422, detail={"code": "unsupported_storage_bucket_type", "supported": supported})
+    return bucket_type
+
+
+def storage_bucket_config(bucket: StorageBucket) -> dict:
+    try:
+        value = json.loads(bucket.config_json or "{}")
+    except json.JSONDecodeError:
+        value = {}
+    return value if isinstance(value, dict) else {}
+
+
+def public_storage_bucket_config(bucket: StorageBucket) -> dict:
+    config = storage_bucket_config(bucket)
+    if bucket.type == "webdav":
+        return {
+            "base_url": normalize_url_setting(config.get("base_url")),
+            "username": str(config.get("username") or ""),
+            "root_path": str(config.get("root_path") or "").strip("/"),
+            "has_password": bool(config.get("password")),
+        }
+    if bucket.type == "local":
+        return {"path": str(config.get("path") or "")}
+    return {}
+
+
+def storage_bucket_payload(bucket: StorageBucket) -> dict:
+    return {
+        "id": bucket.id,
+        "name": bucket.name,
+        "type": bucket.type,
+        "is_active": bucket.is_active,
+        "config": public_storage_bucket_config(bucket),
+    }
+
+
+def ensure_default_storage_bucket(db: Session, settings: Settings) -> StorageBucket:
+    bucket = db.scalar(select(StorageBucket).order_by(StorageBucket.id))
+    if bucket is None:
+        bucket = StorageBucket(
+            name=DEFAULT_LOCAL_BUCKET_NAME,
+            type="local",
+            is_active=True,
+            config_json=json.dumps({"path": str(settings.object_storage_path)}, ensure_ascii=False),
+            created_at=utc_now(),
+            updated_at=utc_now(),
+        )
+        db.add(bucket)
+        db.flush()
+        return bucket
+
+    if db.scalar(select(StorageBucket).where(StorageBucket.is_active.is_(True))) is None:
+        bucket.is_active = True
+        db.flush()
+    return bucket
+
+
+def storage_buckets(db: Session, settings: Settings) -> list[StorageBucket]:
+    ensure_default_storage_bucket(db, settings)
+    return list(db.scalars(select(StorageBucket).order_by(StorageBucket.id)))
+
+
+def active_storage_bucket(db: Session, settings: Settings) -> StorageBucket:
+    ensure_default_storage_bucket(db, settings)
+    bucket = db.scalar(select(StorageBucket).where(StorageBucket.is_active.is_(True)).order_by(StorageBucket.id))
+    if bucket is None:
+        bucket = db.scalar(select(StorageBucket).order_by(StorageBucket.id))
+        if bucket is None:
+            raise HTTPException(status_code=500, detail={"code": "storage_bucket_missing"})
+        bucket.is_active = True
+        db.flush()
+    return bucket
+
+
+def storage_bucket_for_version(db: Session, settings: Settings, version: PersistentVersion) -> StorageBucket:
+    if version.bucket_id is None:
+        return ensure_default_storage_bucket(db, settings)
+    bucket = db.get(StorageBucket, version.bucket_id)
+    if bucket is None:
+        raise HTTPException(status_code=500, detail={"code": "storage_bucket_missing", "bucket_id": version.bucket_id})
+    return bucket
+
+
+def storage_for_bucket(bucket: StorageBucket) -> ObjectStorage:
+    config = storage_bucket_config(bucket)
+    if bucket.type == "local":
+        return LocalObjectStorage(Path(str(config.get("path") or "./data/objects")))
+    if bucket.type == "webdav":
+        return WebDavObjectStorage(
+            base_url=normalize_url_setting(config.get("base_url")),
+            username=str(config.get("username") or ""),
+            password=str(config.get("password") or ""),
+            root_path=str(config.get("root_path") or "").strip("/"),
+        )
+    raise HTTPException(status_code=500, detail={"code": "unsupported_storage_bucket_type"})
+
+
+def version_storage(db: Session, settings: Settings, version: PersistentVersion) -> ObjectStorage:
+    return storage_for_bucket(storage_bucket_for_version(db, settings, version))
+
+
+def get_version_bytes(db: Session, settings: Settings, version: PersistentVersion) -> bytes:
+    return version_storage(db, settings, version).get(version.object_path)
+
+
+def delete_version_object(db: Session, settings: Settings, bucket_id: int | None, object_path: str) -> None:
+    if bucket_id is None:
+        bucket = ensure_default_storage_bucket(db, settings)
+    else:
+        bucket = db.get(StorageBucket, bucket_id)
+        if bucket is None:
+            return
+    storage_for_bucket(bucket).delete(object_path)
+
+
+def normalize_storage_bucket_request(raw_bucket, existing: StorageBucket | None = None) -> tuple[str, str, dict]:
+    name = (raw_bucket.name or "").strip()
+    if not name:
+        raise HTTPException(status_code=422, detail={"code": "storage_bucket_name_required"})
+    bucket_type = normalize_storage_bucket_type(raw_bucket.type)
+    raw_config = raw_bucket.config or {}
+
+    if bucket_type == "local":
+        path = str(raw_config.get("path") or "").strip()
+        if not path:
+            raise HTTPException(status_code=422, detail={"code": "local_storage_path_required"})
+        return name, bucket_type, {"path": path}
+
+    base_url = normalize_url_setting(raw_config.get("base_url"))
+    if not base_url:
+        raise HTTPException(status_code=422, detail={"code": "webdav_base_url_required"})
+    password = str(raw_config.get("password") or "")
+    if password == "" and existing is not None and existing.type == "webdav":
+        password = str(storage_bucket_config(existing).get("password") or "")
+    return (
+        name,
+        bucket_type,
+        {
+            "base_url": base_url,
+            "username": str(raw_config.get("username") or ""),
+            "password": password,
+            "root_path": str(raw_config.get("root_path") or "").strip("/"),
+        },
+    )
+
+
 def read_system_setting(db: Session, key: str) -> str | None:
     setting = db.get(SystemSetting, key)
     return setting.value if setting else None
@@ -216,11 +370,15 @@ def system_settings_payload(db: Session, request: Request) -> dict:
     origin = request_origin(request)
     backend_api_url = normalize_url_setting(read_system_setting(db, SETTING_BACKEND_API_URL))
     frontend_web_url = normalize_url_setting(read_system_setting(db, SETTING_FRONTEND_WEB_URL))
+    buckets = storage_buckets(db, request.app.state.settings)
+    active_bucket = next((bucket for bucket in buckets if bucket.is_active), buckets[0] if buckets else None)
     return {
         "backend_api_url": backend_api_url or origin,
         "frontend_web_url": frontend_web_url or origin,
         "profile_storage_limit_bytes": profile_storage_limit_bytes(db),
         "max_active_profiles_per_account": max_active_profiles_per_account(db),
+        "active_storage_bucket_id": active_bucket.id if active_bucket else None,
+        "storage_buckets": [storage_bucket_payload(bucket) for bucket in buckets],
     }
 
 
@@ -230,8 +388,55 @@ def save_system_settings(db: Session, request: Request, payload) -> dict:
     write_system_setting(db, SETTING_FRONTEND_WEB_URL, normalize_url_setting(payload.frontend_web_url), now)
     write_system_setting(db, SETTING_PROFILE_STORAGE_LIMIT_BYTES, str(payload.profile_storage_limit_bytes), now)
     write_system_setting(db, SETTING_MAX_ACTIVE_PROFILES_PER_ACCOUNT, str(payload.max_active_profiles_per_account), now)
+    ensure_default_storage_bucket(db, request.app.state.settings)
+    requested_active_id = payload.active_storage_bucket_id
+    if payload.storage_buckets is not None:
+        for raw_bucket in payload.storage_buckets:
+            existing = db.get(StorageBucket, raw_bucket.id) if raw_bucket.id is not None else None
+            if raw_bucket.id is not None and existing is None:
+                raise HTTPException(status_code=404, detail={"code": "storage_bucket_not_found"})
+            name, bucket_type, config = normalize_storage_bucket_request(raw_bucket, existing)
+            if existing is None:
+                existing = StorageBucket(
+                    name=name,
+                    type=bucket_type,
+                    is_active=False,
+                    config_json=json.dumps(config, ensure_ascii=False),
+                    created_at=now,
+                    updated_at=now,
+                )
+                db.add(existing)
+                db.flush()
+            else:
+                existing.name = name
+                existing.type = bucket_type
+                existing.config_json = json.dumps(config, ensure_ascii=False)
+                existing.updated_at = now
+            if payload.active_storage_bucket_id is None and raw_bucket.is_active:
+                requested_active_id = existing.id
+
+    if requested_active_id is not None:
+        active = db.get(StorageBucket, requested_active_id)
+        if active is None:
+            raise HTTPException(status_code=404, detail={"code": "storage_bucket_not_found"})
+        for bucket in db.scalars(select(StorageBucket)):
+            bucket.is_active = bucket.id == active.id
+            bucket.updated_at = now
     db.flush()
     return system_settings_payload(db, request)
+
+
+def delete_storage_bucket(db: Session, settings: Settings, bucket_id: int) -> None:
+    default_bucket = ensure_default_storage_bucket(db, settings)
+    bucket = db.get(StorageBucket, bucket_id)
+    if bucket is None:
+        raise HTTPException(status_code=404, detail={"code": "storage_bucket_not_found"})
+    referenced = db.scalar(
+        select(func.count(PersistentVersion.id)).where(PersistentVersion.bucket_id == bucket.id)
+    ) or 0
+    if bucket.id == default_bucket.id or bucket.is_active or referenced > 0:
+        raise HTTPException(status_code=409, detail={"code": "storage_bucket_in_use"})
+    db.delete(bucket)
 
 
 def active_ban(db: Session, target_type: str, target_id: int, now: datetime) -> Ban | None:
@@ -340,7 +545,7 @@ def projected_profile_storage_usage(db: Session, profile_id: int, backup_date: d
 
 def store_upload(
     db: Session,
-    storage: LocalObjectStorage,
+    settings: Settings,
     profile: Profile,
     data: bytes,
     renpy_version: str | None,
@@ -349,6 +554,8 @@ def store_upload(
 ) -> PersistentVersion:
     sha = hashlib.sha256(data).hexdigest()
     backup_date = now.date()
+    bucket = active_storage_bucket(db, settings)
+    storage = storage_for_bucket(bucket)
     backup = db.scalar(
         select(PersistentDailyBackup).where(
             PersistentDailyBackup.profile_id == profile.id,
@@ -357,9 +564,11 @@ def store_upload(
     )
 
     old_object_path = None
+    old_bucket_id = None
     if backup is None:
         version = PersistentVersion(
             profile_id=profile.id,
+            bucket_id=bucket.id,
             object_path="pending",
             sha256=sha,
             size=len(data),
@@ -382,6 +591,8 @@ def store_upload(
         if version is None:
             raise HTTPException(status_code=500, detail={"code": "persistent_version_missing"})
         old_object_path = version.object_path
+        old_bucket_id = version.bucket_id
+        version.bucket_id = bucket.id
         version.sha256 = sha
         version.size = len(data)
         version.renpy_version = sanitize_version(renpy_version)
@@ -401,7 +612,7 @@ def store_upload(
     profile.last_upload_at = now
     db.flush()
     if old_object_path is not None and old_object_path != version.object_path:
-        storage.delete(old_object_path)
+        delete_version_object(db, settings, old_bucket_id, old_object_path)
     prune_backups(db, profile.id)
     return version
 
@@ -438,14 +649,18 @@ def restore_backup(db: Session, profile_id: int, backup_id: int, now: datetime) 
 
 def delete_profile_key(
     db: Session,
-    storage: LocalObjectStorage,
+    settings: Settings,
     request: Request,
     actor: User,
     profile: Profile,
     action: str,
 ) -> None:
-    object_paths = list(
-        db.scalars(select(PersistentVersion.object_path).where(PersistentVersion.profile_id == profile.id))
+    object_refs = list(
+        db.execute(
+            select(PersistentVersion.bucket_id, PersistentVersion.object_path).where(
+                PersistentVersion.profile_id == profile.id
+            )
+        )
     )
     audit(
         db,
@@ -469,8 +684,8 @@ def delete_profile_key(
     )
     db.delete(profile)
     db.commit()
-    for object_path in object_paths:
-        storage.delete(object_path)
+    for bucket_id, object_path in object_refs:
+        delete_version_object(db, settings, bucket_id, object_path)
 
 
 def profile_storage_usage(db: Session, profile_id: int) -> int:
