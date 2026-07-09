@@ -49,6 +49,7 @@ class SyncStatus(object):
 
     def mark_error(self, message):
         if isinstance(message, Exception):
+            submod_log_error(format_error_for_log(message))
             self.last_error = text_type(type(message).__name__)
         elif isinstance(message, str):
             self.last_error = text_type(message)
@@ -70,9 +71,10 @@ def submod_log_debug(message):
 def submod_log_error(message):
     """Log error message to MAS submod log (safe no-op if unavailable)."""
     try:
-        store.mas_submod_utils.submod_log.error(str(message))
+        store.mas_submod_utils.submod_log.error(text_type(message))
+        return True
     except Exception:
-        pass
+        raise RuntimeError("MAS UniSync could not write log message: " + text_type(message))
 
 
 def submod_log_info(message):
@@ -81,6 +83,22 @@ def submod_log_info(message):
         store.mas_submod_utils.submod_log.info(str(message))
     except Exception:
         pass
+
+
+def submod_log_panel_error(message):
+    if message:
+        submod_log_error("MAS UniSync panel error: " + text_type(message))
+
+
+def format_error_for_log(message):
+    if isinstance(message, Exception):
+        detail = text_type(message)
+        error_type = text_type(type(message).__name__)
+        if detail:
+            return "{0}: {1}".format(error_type, detail)
+        return error_type
+    return text_type(message)
+
 
 def text_type(value):
     try:
@@ -283,6 +301,31 @@ def cleanup_current_eli_data_for_device(persistent_obj, has_label):
     return True
 
 
+def renpy_label_exists(label):
+    try:
+        import renpy as renpy_module
+    except Exception:
+        return False
+
+    label = text_type(label)
+    try:
+        script = getattr(getattr(renpy_module, "game", None), "script", None)
+        has_label = getattr(script, "has_label", None)
+        if has_label is not None:
+            return bool(has_label(label))
+    except Exception:
+        pass
+
+    try:
+        has_label = getattr(renpy_module, "has_label", None)
+        if has_label is not None:
+            return bool(has_label(label))
+    except Exception:
+        pass
+
+    return False
+
+
 def load_persistent_bytes_into_renpy(data, early_log=None):
     import renpy
     import zlib
@@ -296,7 +339,7 @@ def load_persistent_bytes_into_renpy(data, early_log=None):
 
     renpy.game.persistent.__dict__.clear()
     renpy.game.persistent.__dict__.update(remote_persistent.__dict__)
-    cleanup_current_eli_data_for_device(renpy.game.persistent, renpy.has_label)
+    cleanup_current_eli_data_for_device(renpy.game.persistent, renpy_label_exists)
     renpy.game.persistent._update()
 
     if early_log is not None:

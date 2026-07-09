@@ -72,11 +72,26 @@ def test_remote_persistent_current_eli_data_is_cleaned_after_memory_helper_repla
         "renpy.game.persistent.__dict__.update(remote_persistent.__dict__)"
     )
     cleanup_index = helper_source.index(
-        "cleanup_current_eli_data_for_device(renpy.game.persistent, renpy.has_label)"
+        "cleanup_current_eli_data_for_device(renpy.game.persistent, renpy_label_exists)"
     )
     update_index = helper_source.index("renpy.game.persistent._update()")
 
     assert replacement_index < cleanup_index < update_index
+
+
+def test_submod_error_log_uses_preinitialized_mas_submod_logger():
+    header_source = Path("game/Submods/MAS_UniSync/header.rpy").read_text(
+        encoding="utf-8"
+    )
+    core_source = Path("game/Submods/MAS_UniSync/mas_unisync_core.py").read_text(
+        encoding="utf-8"
+    )
+
+    assert 'store.mas_logging.init_log("submod_log")' not in header_source
+    assert "mas_unisync_core.store = store" in header_source
+    assert "store.mas_submod_utils.submod_log.error" in core_source
+    assert "store.mas_submod_utils.submod_log.debug" in core_source
+    assert "store.mas_submod_utils.submod_log.info" in core_source
 
 
 def test_submod_http_does_not_import_uuid_module_missing_from_renpy_699():
@@ -163,6 +178,24 @@ def test_runtime_sync_status_is_not_stored_in_persistent():
     assert "persistent._mas_unisync_status" not in hooks_source
     assert "mas_unisync_status = {" in header_source
     assert '"_mas_unisync_status"' in hooks_source
+
+
+def test_status_panel_message_updates_are_logged():
+    header_source = Path("game/Submods/MAS_UniSync/header.rpy").read_text(
+        encoding="utf-8"
+    )
+    update_status_source = header_source.split(
+        "def mas_unisync_update_status(status_obj=None, message=None):", 1
+    )[1].split(
+        "def mas_unisync_profile_key_on_change(profile_key):", 1
+    )[0]
+
+    assert 'mas_unisync_core.submod_log_panel_error(message)' in update_status_source
+    assert update_status_source.index(
+        'mas_unisync_status["last_error"] = message'
+    ) < update_status_source.index(
+        'mas_unisync_core.submod_log_panel_error(message)'
+    )
 
 
 def test_persistent_guard_hook_only_runs_when_unisync_is_enabled():

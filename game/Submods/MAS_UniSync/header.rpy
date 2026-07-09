@@ -16,6 +16,7 @@ init -990 python:
     import mas_unisync_http
     import mas_unisync_sync
     import mas_unisync_guard
+    mas_unisync_core.store = store
 
     try:
         basestring
@@ -181,6 +182,7 @@ init -989 python:
             mas_unisync_status["last_error"] = status_obj.last_error
         if message is not None:
             mas_unisync_status["last_error"] = message
+            mas_unisync_core.submod_log_panel_error(message)
 
     def mas_unisync_profile_key_on_change(profile_key):
         return False, _("请使用 MAS UniSync 设置面板里的粘贴按钮配置 Profile Key。")

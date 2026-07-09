@@ -143,6 +143,55 @@ def test_load_persistent_bytes_into_renpy_replaces_memory_and_updates(monkeypatc
     assert current_persistent.updated is True
 
 
+def test_load_persistent_bytes_into_renpy_uses_script_has_label_on_renpy6(monkeypatch):
+    core = load_client_module("mas_unisync_core")
+
+    class CurrentPersistent:
+        def __init__(self):
+            self.updated = False
+
+        def _update(self):
+            self.updated = True
+
+    current_persistent = CurrentPersistent()
+    remote_persistent = types.SimpleNamespace(
+        remote_value="remote",
+        _mas_curr_eli_data=("remote_only_topic", False, {"source": "remote"}),
+    )
+    payload = zlib.compress(pickle.dumps(remote_persistent)) + b"save-token-signature"
+    fake_renpy = types.SimpleNamespace(
+        game=types.SimpleNamespace(
+            persistent=current_persistent,
+            script=types.SimpleNamespace(has_label=lambda label: label == "local_topic"),
+        ),
+    )
+    monkeypatch.setitem(sys.modules, "renpy", fake_renpy)
+
+    loaded = core.load_persistent_bytes_into_renpy(payload)
+
+    assert loaded is current_persistent
+    assert current_persistent.remote_value == "remote"
+    assert current_persistent._mas_curr_eli_data is None
+    assert current_persistent.updated is True
+
+
+def test_renpy_label_exists_prefers_script_has_label(monkeypatch):
+    core = load_client_module("mas_unisync_core")
+    calls = []
+    fake_renpy = types.SimpleNamespace(
+        has_label=lambda label: calls.append(("exports", label)) or False,
+        game=types.SimpleNamespace(
+            script=types.SimpleNamespace(
+                has_label=lambda label: calls.append(("script", label)) or True
+            ),
+        ),
+    )
+    monkeypatch.setitem(sys.modules, "renpy", fake_renpy)
+
+    assert core.renpy_label_exists("target_label") is True
+    assert calls == [("script", "target_label")]
+
+
 def test_display_text_escapes_braces_and_brackets_used_by_renpy_substitution():
     core = load_client_module("mas_unisync_core")
 
@@ -180,6 +229,92 @@ def test_upload_state_skips_duplicate_hashes():
     state.mark_upload_success("abc", "2026-01-01T00:00:00")
     assert state.should_upload_hash("abc") is False
     assert state.should_upload_hash("def") is True
+
+
+def test_status_exception_summary_logs_full_error_for_panel_detail():
+    core = load_client_module("mas_unisync_core")
+    logged_errors = []
+
+    class FakeLog:
+        def error(self, message):
+            logged_errors.append(message)
+
+    core.store = types.SimpleNamespace(
+        mas_submod_utils=types.SimpleNamespace(submod_log=FakeLog())
+    )
+
+    class UniSyncHTTPError(Exception):
+        pass
+
+    state = core.SyncStatus()
+    state.mark_error(UniSyncHTTPError("GET /v1/profile/resolve failed with HTTP 403"))
+
+    assert state.last_error == "UniSyncHTTPError"
+    assert logged_errors == [
+        "UniSyncHTTPError: GET /v1/profile/resolve failed with HTTP 403"
+    ]
+
+
+def test_panel_error_logger_records_non_empty_panel_messages():
+    core = load_client_module("mas_unisync_core")
+    logged_errors = []
+
+    class FakeLog:
+        def error(self, message):
+            logged_errors.append(message)
+
+    core.store = types.SimpleNamespace(
+        mas_submod_utils=types.SimpleNamespace(submod_log=FakeLog())
+    )
+
+    core.submod_log_panel_error("UniSyncHTTPError")
+    core.submod_log_panel_error("")
+
+    assert logged_errors == ["MAS UniSync panel error: UniSyncHTTPError"]
+
+
+def test_error_logger_does_not_use_renpy_log():
+    core = load_client_module("mas_unisync_core")
+    renpy_messages = []
+    logged_errors = []
+
+    class FakeLog:
+        def error(self, message):
+            logged_errors.append(message)
+
+    core.store = types.SimpleNamespace(
+        mas_submod_utils=types.SimpleNamespace(submod_log=FakeLog())
+    )
+    core.renpy = types.SimpleNamespace(log=lambda message: renpy_messages.append(message))
+
+    core.submod_log_error("UniSyncHTTPError: connection failed")
+
+    assert logged_errors == ["UniSyncHTTPError: connection failed"]
+    assert renpy_messages == []
+
+
+def test_error_logger_raises_when_submod_log_rejects_message():
+    core = load_client_module("mas_unisync_core")
+
+    class FailingLog:
+        def error(self, message):
+            raise RuntimeError("submod log unavailable")
+
+    core.store = types.SimpleNamespace(
+        mas_submod_utils=types.SimpleNamespace(submod_log=FailingLog())
+    )
+    renpy_messages = []
+    core.renpy = types.SimpleNamespace(log=lambda message: renpy_messages.append(message))
+
+    try:
+        core.submod_log_error("UniSyncHTTPError: connection failed")
+    except RuntimeError as exc:
+        assert str(exc) == (
+            "MAS UniSync could not write log message: UniSyncHTTPError: connection failed"
+        )
+        assert renpy_messages == []
+    else:
+        raise AssertionError("submod_log_error must not silently drop log messages")
 
 
 def test_persistent_guard_accepts_defaultdict():
