@@ -57,16 +57,26 @@ class SyncSession(object):
         )
         return body
 
-    def start(self, upload_after_sync=False):
+    def start(self, upload_after_sync=False, load_remote_into_memory=False):
         if not self.profile_key:
             self.status.enabled = False
             return self.status
-        self.resolve_profile()
-        self.acquire_lock()
-        self.sync_current()
-        if upload_after_sync:
-            self.upload_persistent()
-        return self.status
+        lock_acquired = False
+        try:
+            self.resolve_profile()
+            self.acquire_lock()
+            lock_acquired = True
+            self.sync_current(load_remote_into_memory=load_remote_into_memory)
+            if upload_after_sync:
+                self.upload_persistent()
+            return self.status
+        except Exception:
+            if lock_acquired and self.status.lease_token:
+                try:
+                    self.release()
+                except Exception:
+                    pass
+            raise
 
     def resolve_profile(self):
         return self.request_json("GET", "/v1/profile/resolve", headers=self.headers())
@@ -112,7 +122,7 @@ class SyncSession(object):
                 return None
             raise
 
-    def sync_current(self):
+    def sync_current(self, load_remote_into_memory=False):
         metadata = self.current_metadata()
         if metadata is None:
             return None
@@ -122,8 +132,13 @@ class SyncSession(object):
         local_sha = core.sha256_file(self.persistent_path) if os.path.isfile(self.persistent_path) else ""
         if local_sha != remote_sha:
             body = self.request_bytes("GET", "/v1/persistent/download", headers=self.headers())
-            new_sha = core.replace_persistent_from_bytes(body, self.persistent_path, self.backup_dir)
+            if load_remote_into_memory:
+                core.load_persistent_bytes_into_renpy(body)
+                new_sha = remote_sha
+            else:
+                new_sha = core.replace_persistent_from_bytes(body, self.persistent_path, self.backup_dir)
             self.status.mark_download_success(new_sha)
+            self.status.last_remote_sha256 = remote_sha
         else:
             self.status.last_local_hash = local_sha
             self.status.last_remote_sha256 = remote_sha

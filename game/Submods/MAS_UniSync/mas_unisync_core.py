@@ -248,14 +248,6 @@ def get_backup_dir(savedir):
     return os.path.join(savedir, "MAS_UniSync_Backups")
 
 
-def _load_http_module():
-    try:
-        from . import mas_unisync_http as http
-    except (ImportError, ValueError):
-        import mas_unisync_http as http
-    return http
-
-
 def load_pickle_payload(payload):
     import pickle as _pickle
     try:
@@ -291,141 +283,22 @@ def cleanup_current_eli_data_for_device(persistent_obj, has_label):
     return True
 
 
-def reload_persistent_from_remote(api_url, profile_key, savedir, early_log=None):
-    """Download remote persistent if newer and replace it on disk/in memory.
-    This runs after MAS API keys are initialized, not during python early.
-    """
+def load_persistent_bytes_into_renpy(data, early_log=None):
     import renpy
-    http = _load_http_module()
+    import zlib
 
-    if not api_url or not profile_key:
-        if early_log is not None:
-            early_log.debug("reload_persistent: missing api_url=%s or profile_key=%s" % (bool(api_url), bool(profile_key)))
-        return
+    decompressor = zlib.decompressobj()
+    payload = decompressor.decompress(data)
+    remote_persistent = load_pickle_payload(payload)
 
-    api_url = normalize_api_url(api_url)
-    persistent_path = get_persistent_path(savedir)
-    backup_dir = get_backup_dir(savedir)
-
-    # Resolve profile
-    resolve_url = api_url.rstrip("/") + "/v1/profile/resolve"
-    try:
-        http.request_json("GET", resolve_url, headers={"X-MAS-Profile-Key": profile_key}, timeout=10)
-    except Exception as _exc:
-        if early_log is not None:
-            early_log.debug("reload_persistent: profile resolve failed: " + str(_exc))
-        return
-
-    # Acquire lock
-    lock_url = api_url.rstrip("/") + "/v1/locks/acquire"
-    lease_token = None
-    try:
-        payload = http.request_json("POST", lock_url, headers={"X-MAS-Profile-Key": profile_key}, data=b"", timeout=10)
-        lease_token = payload.get("lease_token") if isinstance(payload, dict) else None
-    except Exception as _exc:
-        if early_log is not None:
-            early_log.debug("reload_persistent: lock acquire failed: " + str(_exc))
-        if getattr(_exc, "status", None) == 409 or getattr(_exc, "code", None) == "lock_held":
-            raise UniSyncLockNotHeldError(
-                "Unable to reload persistent: the sync lock is held by another client. "
-                "Close other MAS instances or wait about 60 seconds for the lease to expire, then restart."
-            )
-        raise UniSyncError("Unable to reload persistent: " + str(_exc))
-
-    if not lease_token:
-        if early_log is not None:
-            early_log.debug("reload_persistent: no lease token, skipping sync")
-        raise UniSyncError("Unable to reload persistent: lock acquisition response did not include lease_token")
-
-    # Check current remote metadata
-    meta_url = api_url.rstrip("/") + "/v1/persistent/current"
-    headers = {"X-MAS-Profile-Key": profile_key, "X-MAS-Lease-Token": lease_token}
-    try:
-        metadata = http.request_json("GET", meta_url, headers=headers, timeout=10)
-        remote_sha = metadata.get("sha256") if isinstance(metadata, dict) else None
-    except Exception as _exc:
-        if early_log is not None:
-            early_log.debug("reload_persistent: metadata fetch failed: " + str(_exc))
-        _release_lock(api_url, headers, early_log)
-        return
-
-    if not remote_sha:
-        if early_log is not None:
-            early_log.debug("reload_persistent: no remote sha256")
-        _release_lock(api_url, headers, early_log)
-        return
-
-    # Compare with local
-    local_sha = sha256_file(persistent_path) if os.path.isfile(persistent_path) else ""
-
-    if local_sha == remote_sha:
-        if early_log is not None:
-            early_log.debug("reload_persistent: local matches remote, no sync needed")
-        _release_lock(api_url, headers, early_log)
-        return
-
-    # Download remote
-    download_url = api_url.rstrip("/") + "/v1/persistent/download"
-    try:
-        _status, body = http.request("GET", download_url, headers=headers, timeout=30)
-    except Exception as _exc:
-        if early_log is not None:
-            early_log.debug("reload_persistent: download failed: " + str(_exc))
-        _release_lock(api_url, headers, early_log)
-        return
-
-    # Backup and replace on disk
-    try:
-        create_local_backup(persistent_path, backup_dir)
-        tmp_path = persistent_path + ".unisync-new"
-        with open(tmp_path, "wb") as f:
-            f.write(body)
-        if os.path.exists(persistent_path):
-            os.unlink(persistent_path)
-        os.rename(tmp_path, persistent_path)
-    except Exception as _exc:
-        if early_log is not None:
-            early_log.debug("reload_persistent: disk write failed: " + str(_exc))
-        _release_lock(api_url, headers, early_log)
-        return
-
-    # Replace in-memory persistent
-    # Load downloaded persistent directly (bypass save token check)
-    try:
-        import zlib
-        with open(persistent_path, 'rb') as _f:
-            _do = zlib.decompressobj()
-            _s = _do.decompress(_f.read())
-        # Discard save token signature (_do.unused_data), unpickle directly
-        remote_persistent = load_pickle_payload(_s)
-    except Exception as _exc:
-        if early_log is not None:
-            early_log.debug('reload_persistent: unpickle failed: ' + str(_exc))
-        remote_persistent = None
-
-    # Replace renpy.game.persistent with the downloaded data
-    if remote_persistent is not None:
-        if early_log is not None:
-            early_log.debug('reload_persistent: downloading persistent from remote')
-        renpy.game.persistent.__dict__.clear()
-        renpy.game.persistent.__dict__.update(remote_persistent.__dict__)
-        cleanup_current_eli_data_for_device(renpy.game.persistent, renpy.has_label)
-        renpy.game.persistent._update()
-
-        if early_log is not None:
-            early_log.info('reload_persistent: persistent swapped')
-        _release_lock(api_url, headers, early_log)
-        return True
-
-    # Load failed
     if early_log is not None:
-        early_log.error('reload_persistent: persistent load failed, releasing lease')
-    _release_lock(api_url, headers, early_log)
+        early_log.debug("load_persistent_bytes_into_renpy: loading remote persistent into memory")
 
-def _release_lock(api_url, headers, early_log):
-    http = _load_http_module()
-    try:
-        release_url = api_url.rstrip("/") + "/v1/locks/release"
-        http.request("POST", release_url, data=b"", headers=headers, timeout=10)
-    except Exception:
-        pass
+    renpy.game.persistent.__dict__.clear()
+    renpy.game.persistent.__dict__.update(remote_persistent.__dict__)
+    cleanup_current_eli_data_for_device(renpy.game.persistent, renpy.has_label)
+    renpy.game.persistent._update()
+
+    if early_log is not None:
+        early_log.info("load_persistent_bytes_into_renpy: persistent swapped")
+    return renpy.game.persistent

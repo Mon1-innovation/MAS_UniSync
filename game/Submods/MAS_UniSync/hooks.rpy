@@ -100,7 +100,7 @@ init -968 python:
         mas_unisync_heartbeat_thread.daemon = True
         mas_unisync_heartbeat_thread.start()
 
-    def mas_unisync_startup_sync(force=False, raise_on_failure=False, upload_after_sync=False):
+    def mas_unisync_startup_sync(force=False, raise_on_failure=False, upload_after_sync=False, load_remote_into_memory=False):
         global mas_unisync_session, mas_unisync_lock_not_held
         profile_key = mas_unisync_get_profile_key()
         if not profile_key:
@@ -113,7 +113,7 @@ init -968 python:
             return mas_unisync_session
         mas_unisync_session = mas_unisync_make_session()
         try:
-            mas_unisync_session.start(upload_after_sync=upload_after_sync)
+            mas_unisync_session.start(upload_after_sync=upload_after_sync, load_remote_into_memory=load_remote_into_memory)
             mas_unisync_lock_not_held = False
             mas_unisync_update_status(mas_unisync_session.status)
             try:
@@ -130,32 +130,6 @@ init -968 python:
             mas_unisync_update_status(mas_unisync_session.status)
             if raise_on_failure:
                 raise
-            return None
-
-    def mas_unisync_reload_persistent_after_api_keys():
-        _api_url = mas_unisync_get_host()
-        _profile_key = mas_unisync_get_profile_key()
-        if not _api_url or not _profile_key:
-            return None
-        try:
-            _early_log = None
-            try:
-                _early_log = store.mas_submod_utils.submod_log
-            except Exception:
-                pass
-            return mas_unisync_core.reload_persistent_from_remote(
-                _api_url,
-                _profile_key,
-                mas_unisync_savedir(),
-                early_log=_early_log,
-            )
-        except mas_unisync_core.UniSyncLockNotHeldError as exc:
-            return mas_unisync_enter_lock_not_held_mode(exc)
-        except mas_unisync_core.UniSyncError:
-            raise
-        except Exception as exc:
-            mas_unisync_core.submod_log_debug(str(exc))
-            mas_unisync_update_status(message=mas_unisync_core.renpy_safe_text(str(exc)))
             return None
 
     def mas_unisync_validate_persistent_for_upload(raise_on_failure=False):
@@ -334,26 +308,29 @@ init -968 python:
         if mas_unisync_lock_not_held:
             return
         mas_unisync_stop_event.set()
-        if mas_unisync_upload_thread is not None and mas_unisync_upload_thread.is_alive():
-            mas_unisync_upload_thread.join(5.0)
-        if mas_unisync_session is not None and mas_unisync_session.status.enabled:
-            mas_unisync_upload_now(raise_on_failure=True)
-            mas_unisync_session.release()
-            mas_unisync_update_status(mas_unisync_session.status)
+        try:
+            if mas_unisync_upload_thread is not None and mas_unisync_upload_thread.is_alive():
+                mas_unisync_upload_thread.join(5.0)
+            if mas_unisync_session is not None and mas_unisync_session.status.enabled:
+                mas_unisync_upload_now(raise_on_failure=True)
+        finally:
+            if mas_unisync_session is not None and mas_unisync_session.status.lease_token:
+                try:
+                    mas_unisync_session.release()
+                    mas_unisync_update_status(mas_unisync_session.status)
+                except Exception as exc:
+                    mas_unisync_core.submod_log_debug(str(exc))
 
     mas_unisync_cleanup_for_renpy6()
     mas_unisync_install_save_hook()
     mas_unisync_install_lock_not_held_overlay()
 
-    mas_unisync_reload_persistent_after_api_keys()
-
-    # If API keys are configured, start a fresh session after direct reload.
     if mas_unisync_session is None and not mas_unisync_lock_not_held:
         _api_url = mas_unisync_get_host()
         _profile_key = mas_unisync_get_profile_key()
         if _api_url and _profile_key:
             mas_unisync_session = mas_unisync_make_session()
-            mas_unisync_startup_sync(force=True)
+            mas_unisync_startup_sync(force=True, load_remote_into_memory=True)
 
 init python:
     @store.mas_submod_utils.functionplugin("_quit", priority=-100)
@@ -362,6 +339,7 @@ init python:
             return
         if not mas_unisync_guard_enabled():
             renpy.persistent.save()
+            mas_unisync_shutdown()
             return
         _issues = mas_unisync_find_persistent_issues()
         if _issues:

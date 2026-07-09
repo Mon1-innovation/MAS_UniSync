@@ -290,6 +290,89 @@ def test_sync_session_downloads_cloud_first_when_remote_hash_differs(tmp_path):
     assert session.status.last_download_at
 
 
+def test_start_can_load_remote_persistent_into_memory_without_replacing_local_file(monkeypatch, tmp_path):
+    sync = load_client_module("mas_unisync_sync")
+    persistent = tmp_path / "persistent"
+    persistent.write_bytes(b"local")
+    requests = []
+    loaded_bodies = []
+
+    def fake_urlopen(request, timeout):
+        requests.append(request)
+        if request.full_url.endswith("/v1/profile/resolve"):
+            return FakeResponse(200, {"profile": {"id": 7}})
+        if request.full_url.endswith("/v1/locks/acquire"):
+            return FakeResponse(200, {"lease_token": "lease_123"})
+        if request.full_url.endswith("/v1/persistent/current"):
+            return FakeResponse(200, {"sha256": "remotehash", "created_at": "2026-01-01T00:00:00Z"})
+        if request.full_url.endswith("/v1/persistent/download"):
+            return FakeResponse(200, body=b"cloud")
+        if request.full_url.endswith("/v1/locks/release"):
+            raise AssertionError("successful memory load should keep the startup lease")
+        raise AssertionError(f"unexpected URL {request.full_url}")
+
+    def fake_load_persistent(data):
+        loaded_bodies.append(data)
+
+    monkeypatch.setattr(sync.core, "load_persistent_bytes_into_renpy", fake_load_persistent)
+
+    session = sync.SyncSession("100.72.137.92", "maspk_test", str(persistent), str(tmp_path / "backups"), urlopen=fake_urlopen)
+    session.start(load_remote_into_memory=True)
+
+    assert loaded_bodies == [b"cloud"]
+    assert persistent.read_bytes() == b"local"
+    assert not (tmp_path / "backups").exists()
+    assert [request.full_url for request in requests] == [
+        "http://100.72.137.92:8000/v1/profile/resolve",
+        "http://100.72.137.92:8000/v1/locks/acquire",
+        "http://100.72.137.92:8000/v1/persistent/current",
+        "http://100.72.137.92:8000/v1/persistent/download",
+    ]
+    assert session.status.lock_state == "locked"
+    assert session.status.last_local_hash == "remotehash"
+
+
+def test_start_releases_lease_when_memory_load_fails(monkeypatch, tmp_path):
+    sync = load_client_module("mas_unisync_sync")
+    persistent = tmp_path / "persistent"
+    persistent.write_bytes(b"local")
+    requests = []
+
+    def fake_urlopen(request, timeout):
+        requests.append(request)
+        if request.full_url.endswith("/v1/profile/resolve"):
+            return FakeResponse(200, {"profile": {"id": 7}})
+        if request.full_url.endswith("/v1/locks/acquire"):
+            return FakeResponse(200, {"lease_token": "lease_123"})
+        if request.full_url.endswith("/v1/persistent/current"):
+            return FakeResponse(200, {"sha256": "remotehash", "created_at": "2026-01-01T00:00:00Z"})
+        if request.full_url.endswith("/v1/persistent/download"):
+            return FakeResponse(200, body=b"cloud")
+        if request.full_url.endswith("/v1/locks/release"):
+            return FakeResponse(204)
+        raise AssertionError(f"unexpected URL {request.full_url}")
+
+    def fail_load_persistent(data):
+        raise ValueError("bad persistent")
+
+    monkeypatch.setattr(sync.core, "load_persistent_bytes_into_renpy", fail_load_persistent)
+
+    session = sync.SyncSession("100.72.137.92", "maspk_test", str(persistent), str(tmp_path / "backups"), urlopen=fake_urlopen)
+
+    with pytest.raises(ValueError, match="bad persistent"):
+        session.start(load_remote_into_memory=True)
+
+    assert persistent.read_bytes() == b"local"
+    assert [request.full_url for request in requests] == [
+        "http://100.72.137.92:8000/v1/profile/resolve",
+        "http://100.72.137.92:8000/v1/locks/acquire",
+        "http://100.72.137.92:8000/v1/persistent/current",
+        "http://100.72.137.92:8000/v1/persistent/download",
+        "http://100.72.137.92:8000/v1/locks/release",
+    ]
+    assert session.status.lock_state == "released"
+
+
 def test_start_upload_after_sync_uploads_even_after_downloading_remote_file(tmp_path):
     sync = load_client_module("mas_unisync_sync")
     persistent = tmp_path / "persistent"

@@ -25,7 +25,7 @@ def test_renpy_compat_uses_python2_safe_module_names():
     assert 'sys.modules.get(b"renpy.python")' in compat_source
 
 
-def test_persistent_reload_runs_after_mas_api_keys_init_not_python_early():
+def test_startup_sync_uses_session_memory_load_after_mas_api_keys_init():
     compat_source = Path("game/Submods/MAS_UniSync/00_compat.rpy").read_text(
         encoding="utf-8"
     )
@@ -36,39 +36,45 @@ def test_persistent_reload_runs_after_mas_api_keys_init_not_python_early():
     assert "early_sync_persistent" not in compat_source
     assert "MAS_UniSync: early sync starting" not in compat_source
     assert "init -968 python:" in hooks_source
-    assert "def mas_unisync_reload_persistent_after_api_keys():" in hooks_source
-    assert "mas_unisync_reload_persistent_after_api_keys()" in hooks_source
-    assert "mas_unisync_core.reload_persistent_from_remote(" in hooks_source
     assert "mas_unisync_get_host()" in hooks_source
     assert "mas_unisync_get_profile_key()" in hooks_source
-    assert "except mas_unisync_core.UniSyncError:" in hooks_source
-    assert hooks_source.index("mas_unisync_reload_persistent_after_api_keys()") < hooks_source.index("mas_unisync_startup_sync(force=True)")
+    assert "def mas_unisync_reload_persistent_after_api_keys():" not in hooks_source
+    assert "mas_unisync_reload_persistent_after_api_keys()" not in hooks_source
+    assert "mas_unisync_core.reload_persistent_from_remote(" not in hooks_source
+    assert "mas_unisync_startup_sync(force=True, load_remote_into_memory=True)" in hooks_source
+    assert '"/v1/locks/acquire"' not in hooks_source
+    assert '"/v1/persistent/download"' not in hooks_source
 
 
-def test_persistent_reload_keeps_direct_in_memory_replacement():
+def test_core_helper_keeps_direct_in_memory_replacement():
     core_source = Path("game/Submods/MAS_UniSync/mas_unisync_core.py").read_text(
         encoding="utf-8"
     )
 
-    assert "def reload_persistent_from_remote(api_url, profile_key, savedir, early_log=None):" in core_source
+    assert "def load_persistent_bytes_into_renpy(data, early_log=None):" in core_source
+    assert "def reload_persistent_from_remote(" not in core_source
+    assert "def _release_lock(" not in core_source
     assert "early_load_api_keys" not in core_source
-    assert "load_pickle_payload(_s)" in core_source
+    assert "load_pickle_payload(payload)" in core_source
     assert "renpy.game.persistent.__dict__.clear()" in core_source
     assert "renpy.game.persistent.__dict__.update(remote_persistent.__dict__)" in core_source
     assert "renpy.game.persistent._update()" in core_source
 
 
-def test_remote_persistent_current_eli_data_is_cleaned_after_in_memory_replacement():
+def test_remote_persistent_current_eli_data_is_cleaned_after_memory_helper_replacement():
     core_source = Path("game/Submods/MAS_UniSync/mas_unisync_core.py").read_text(
         encoding="utf-8"
     )
-    replacement_index = core_source.index(
+    helper_source = core_source.split(
+        "def load_persistent_bytes_into_renpy(data, early_log=None):", 1
+    )[1]
+    replacement_index = helper_source.index(
         "renpy.game.persistent.__dict__.update(remote_persistent.__dict__)"
     )
-    cleanup_index = core_source.index(
+    cleanup_index = helper_source.index(
         "cleanup_current_eli_data_for_device(renpy.game.persistent, renpy.has_label)"
     )
-    update_index = core_source.index("renpy.game.persistent._update()")
+    update_index = helper_source.index("renpy.game.persistent._update()")
 
     assert replacement_index < cleanup_index < update_index
 
@@ -89,11 +95,11 @@ def test_startup_sync_does_not_abort_mas_when_profile_key_is_invalid():
         encoding="utf-8"
     )
 
-    assert "def mas_unisync_startup_sync(force=False, raise_on_failure=False, upload_after_sync=False):" in hooks_source
+    assert "def mas_unisync_startup_sync(force=False, raise_on_failure=False, upload_after_sync=False, load_remote_into_memory=False):" in hooks_source
     assert "if raise_on_failure:" in hooks_source
     assert "                raise" in hooks_source
     assert "if _api_url and _profile_key:" in hooks_source
-    assert "mas_unisync_startup_sync(force=True)" in hooks_source
+    assert "mas_unisync_startup_sync(force=True, load_remote_into_memory=True)" in hooks_source
     assert "mas_unisync_startup_sync(force=True, raise_on_failure=True, upload_after_sync=True)" in header_source
     assert "mas_unisync_startup_sync(force=True, raise_on_failure=True)" in hooks_source
 
@@ -122,8 +128,8 @@ def test_profile_key_setup_requests_immediate_upload_after_cloud_sync():
         encoding="utf-8"
     )
 
-    assert "def mas_unisync_startup_sync(force=False, raise_on_failure=False, upload_after_sync=False):" in hooks_source
-    assert "mas_unisync_session.start(upload_after_sync=upload_after_sync)" in hooks_source
+    assert "def mas_unisync_startup_sync(force=False, raise_on_failure=False, upload_after_sync=False, load_remote_into_memory=False):" in hooks_source
+    assert "mas_unisync_session.start(upload_after_sync=upload_after_sync, load_remote_into_memory=load_remote_into_memory)" in hooks_source
     assert header_source.count("upload_after_sync=True") == 1
     assert "def mas_unisync_bootstrap_setup" in header_source
     assert "show_screen" in header_source
@@ -212,6 +218,28 @@ def test_persistent_guard_quit_only_blocks_when_unisync_is_enabled():
     assert "if not mas_unisync_guard_enabled():" in quit_source
     assert "mas_unisync_find_persistent_issues()" in quit_source
     assert "MAS UniSync final persistent save blocked" in quit_source
+
+
+def test_quit_cleanup_releases_session_even_when_guard_is_disabled():
+    hooks_source = Path("game/Submods/MAS_UniSync/hooks.rpy").read_text(
+        encoding="utf-8"
+    )
+    quit_source = hooks_source.split("def mas_unisync_on_quit():", 1)[1]
+    guard_disabled_source = quit_source.split(
+        "if not mas_unisync_guard_enabled():", 1
+    )[1].split(
+        "_issues = mas_unisync_find_persistent_issues()", 1
+    )[0]
+    shutdown_source = hooks_source.split(
+        "def mas_unisync_shutdown():", 1
+    )[1].split(
+        "    mas_unisync_cleanup_for_renpy6()", 1
+    )[0]
+
+    assert "mas_unisync_shutdown()" in guard_disabled_source
+    assert "return" in guard_disabled_source
+    assert "mas_unisync_session.release()" in shutdown_source
+    assert "finally:" in shutdown_source
 
 
 def test_persistent_guard_screens_and_settings_entry_exist():
