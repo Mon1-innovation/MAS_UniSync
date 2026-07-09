@@ -265,45 +265,6 @@ init -968 python:
         except Exception:
             pass
 
-    def mas_unisync_test_connection():
-        try:
-            session = mas_unisync_startup_sync(force=True, raise_on_failure=True)
-            if session is not None:
-                mas_unisync_update_status(session.status)
-            renpy.notify(_("MAS UniSync connection OK"))
-        except Exception as exc:
-            mas_unisync_update_status(message=mas_unisync_core.renpy_safe_text(str(exc)))
-            renpy.notify("MAS UniSync connection failed: " + mas_unisync_core.renpy_safe_text(str(exc)))
-
-    def mas_unisync_manual_upload():
-        global mas_unisync_session
-        try:
-            if mas_unisync_lock_not_held:
-                renpy.notify(_("MAS UniSync 未持有同步锁，已禁用上传"))
-                return
-            if not mas_unisync_get_profile_key():
-                mas_unisync_update_status(message="MAS UniSync profile key is not configured")
-                renpy.notify(_("MAS UniSync profile key is not configured"))
-                return
-            if mas_unisync_session is not None and mas_unisync_session.status.lease_token:
-                try:
-                    mas_unisync_session.release()
-                except Exception:
-                    pass
-            if mas_unisync_session is None or not mas_unisync_session.status.enabled:
-                mas_unisync_session = mas_unisync_make_session()
-            if not mas_unisync_session.status.lease_token:
-                mas_unisync_session.acquire_lock()
-            mas_unisync_update_status(mas_unisync_session.status)
-            mas_unisync_start_heartbeat()
-            mas_unisync_upload_now(raise_on_failure=True, force=True)
-            renpy.notify(_("MAS UniSync upload complete"))
-        except Exception as exc:
-            mas_unisync_update_status(message=mas_unisync_core.renpy_safe_text(str(exc)))
-            renpy.notify("MAS UniSync upload failed: " + mas_unisync_core.renpy_safe_text(str(exc)))
-        finally:
-            renpy.restart_interaction()
-
     def mas_unisync_shutdown():
         if mas_unisync_lock_not_held:
             return

@@ -116,7 +116,6 @@ def test_startup_sync_does_not_abort_mas_when_profile_key_is_invalid():
     assert "if _api_url and _profile_key:" in hooks_source
     assert "mas_unisync_startup_sync(force=True, load_remote_into_memory=True)" in hooks_source
     assert "mas_unisync_startup_sync(force=True, raise_on_failure=True, upload_after_sync=True)" in header_source
-    assert "mas_unisync_startup_sync(force=True, raise_on_failure=True)" in hooks_source
 
 
 def test_mas_version_metadata_comes_from_config_version():
@@ -152,7 +151,7 @@ def test_profile_key_setup_requests_immediate_upload_after_cloud_sync():
     assert "renpy.quit" in header_source
 
 
-def test_settings_panel_exposes_manual_upload_button():
+def test_settings_panel_does_not_expose_manual_upload_or_connection_test():
     header_source = Path("game/Submods/MAS_UniSync/header.rpy").read_text(
         encoding="utf-8"
     )
@@ -160,9 +159,12 @@ def test_settings_panel_exposes_manual_upload_button():
         encoding="utf-8"
     )
 
-    assert "def mas_unisync_manual_upload():" in hooks_source
-    assert 'textbutton _("立即上传")' in header_source
-    assert "action Function(mas_unisync_manual_upload)" in header_source
+    assert "def mas_unisync_manual_upload():" not in hooks_source
+    assert "def mas_unisync_test_connection():" not in hooks_source
+    assert 'textbutton _("立即上传")' not in header_source
+    assert 'textbutton _("测试连接")' not in header_source
+    assert "action Function(mas_unisync_manual_upload)" not in header_source
+    assert "action Function(mas_unisync_test_connection)" not in header_source
 
 
 def test_runtime_sync_status_is_not_stored_in_persistent():
@@ -371,17 +373,10 @@ def test_persistent_guard_runtime_state_is_not_stored_in_persistent():
     assert "default persistent.mas_unisync_guard" not in header_source
 
 
-def test_manual_upload_button_uses_direct_upload_flow():
+def test_manual_upload_button_flow_is_removed():
     hooks_source = Path("game/Submods/MAS_UniSync/hooks.rpy").read_text(
         encoding="utf-8"
     )
-    manual_upload_source = hooks_source.split("def mas_unisync_manual_upload():", 1)[1].split(
-        "    def mas_unisync_shutdown():",
-        1,
-    )[0]
 
-    assert "mas_unisync_make_session()" in manual_upload_source
-    assert ".acquire_lock()" in manual_upload_source
-    assert ".release()" in manual_upload_source
-    assert "mas_unisync_upload_now(raise_on_failure=True, force=True)" in manual_upload_source
-    assert "mas_unisync_startup_sync(" not in manual_upload_source
+    assert "mas_unisync_manual_upload" not in hooks_source
+    assert "mas_unisync_test_connection" not in hooks_source

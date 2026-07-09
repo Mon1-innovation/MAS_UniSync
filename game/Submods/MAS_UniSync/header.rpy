@@ -478,12 +478,6 @@ screen mas_unisync_settingpane():
             textbutton _("打开 Profile Key 页面"):
                 style "mas_button_simple"
                 action Function(mas_unisync_open_profile_keys)
-            textbutton _("立即上传"):
-                style "mas_button_simple"
-                action Function(mas_unisync_manual_upload)
-            textbutton _("测试连接"):
-                style "mas_button_simple"
-                action Function(mas_unisync_test_connection)
             textbutton _("查看 persistent 非标准 class"):
                 style "mas_button_simple"
                 action Function(mas_unisync_open_persistent_guard_detail)
