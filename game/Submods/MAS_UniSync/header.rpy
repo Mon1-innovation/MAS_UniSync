@@ -435,7 +435,7 @@ screen mas_unisync_startup_failure_notice():
             text _("当前会话无法保存，因为连接至 UniSync 服务器失败。"):
                 style "main_menu_version"
                 size 16
-            text _("清除 UniSync API key 以禁用 UniSync。或者修复你的网络问题后重启。"):
+            text _("请清除 UniSync API key 以禁用 UniSync。或者修复你的网络问题后重启。"):
                 style "main_menu_version"
                 size 16
             textbutton _("退出游戏"):

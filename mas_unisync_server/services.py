@@ -3,9 +3,12 @@ from __future__ import annotations
 import hashlib
 import json
 import secrets
+import base64
 from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
 
+import httpx
+from cryptography.fernet import Fernet, InvalidToken
 from fastapi import HTTPException, Request
 from sqlalchemy import delete, desc, func, or_, select
 from sqlalchemy.orm import Session
@@ -65,6 +68,28 @@ SETTING_PROFILE_STORAGE_LIMIT_BYTES = "profile_storage_limit_bytes"
 SETTING_MAX_ACTIVE_PROFILES_PER_ACCOUNT = "max_active_profiles_per_account"
 SUPPORTED_STORAGE_BUCKET_TYPES = {"local", "webdav"}
 DEFAULT_LOCAL_BUCKET_NAME = "Docker local storage"
+ENCRYPTED_STORAGE_PASSWORD_PREFIX = "fernet:"
+
+
+def storage_secret_fernet(settings: Settings) -> Fernet:
+    digest = hashlib.sha256(settings.session_secret.encode()).digest()
+    return Fernet(base64.urlsafe_b64encode(digest))
+
+
+def encrypt_storage_secret(settings: Settings, value: str) -> str:
+    return ENCRYPTED_STORAGE_PASSWORD_PREFIX + storage_secret_fernet(settings).encrypt(value.encode()).decode()
+
+
+def decrypt_storage_secret(settings: Settings, value: str) -> str:
+    if not value:
+        return ""
+    if not value.startswith(ENCRYPTED_STORAGE_PASSWORD_PREFIX):
+        return value
+    token = value.removeprefix(ENCRYPTED_STORAGE_PASSWORD_PREFIX)
+    try:
+        return storage_secret_fernet(settings).decrypt(token.encode()).decode()
+    except InvalidToken as exc:
+        raise HTTPException(status_code=500, detail={"code": "storage_secret_decrypt_failed"}) from exc
 
 
 def sanitize_version(value: str | None) -> str | None:
@@ -196,27 +221,88 @@ def storage_bucket_config(bucket: StorageBucket) -> dict:
     return value if isinstance(value, dict) else {}
 
 
-def public_storage_bucket_config(bucket: StorageBucket) -> dict:
+def storage_bucket_space_budget_bytes(bucket_or_config: StorageBucket | dict) -> int | None:
+    config = storage_bucket_config(bucket_or_config) if isinstance(bucket_or_config, StorageBucket) else bucket_or_config
+    value = config.get("space_budget_bytes")
+    if value is None or value == "":
+        return None
+    try:
+        budget = int(value)
+    except (TypeError, ValueError):
+        return None
+    return budget if budget >= 0 else None
+
+
+def webdav_password_from_config(settings: Settings, config: dict) -> str:
+    encrypted_password = str(config.get("password_encrypted") or "")
+    if encrypted_password:
+        return decrypt_storage_secret(settings, encrypted_password)
+    return str(config.get("password") or "")
+
+
+def public_storage_bucket_config(bucket: StorageBucket, settings: Settings) -> dict:
     config = storage_bucket_config(bucket)
     if bucket.type == "webdav":
         return {
             "base_url": normalize_url_setting(config.get("base_url")),
             "username": str(config.get("username") or ""),
             "root_path": str(config.get("root_path") or "").strip("/"),
-            "has_password": bool(config.get("password")),
+            "has_password": bool(webdav_password_from_config(settings, config)),
         }
     if bucket.type == "local":
         return {"path": str(config.get("path") or "")}
     return {}
 
 
-def storage_bucket_payload(bucket: StorageBucket) -> dict:
+def storage_bucket_reference_summary(db: Session, bucket_id: int) -> dict:
+    backup_count = db.scalar(
+        select(func.count(PersistentDailyBackup.id))
+        .join(PersistentVersion, PersistentVersion.id == PersistentDailyBackup.version_id)
+        .where(PersistentVersion.bucket_id == bucket_id)
+    ) or 0
+    current_count = db.scalar(
+        select(func.count(PersistentCurrent.profile_id))
+        .join(PersistentVersion, PersistentVersion.id == PersistentCurrent.version_id)
+        .where(PersistentVersion.bucket_id == bucket_id)
+    ) or 0
+    version_totals = db.execute(
+        select(
+            func.count(PersistentVersion.id),
+            func.coalesce(func.sum(PersistentVersion.size), 0),
+        ).where(PersistentVersion.bucket_id == bucket_id)
+    ).one()
+    return {
+        "file_count": int(version_totals[0] or 0),
+        "total_size": int(version_totals[1] or 0),
+        "backup_reference_count": int(backup_count),
+        "current_reference_count": int(current_count),
+    }
+
+
+def storage_bucket_has_references(db: Session, bucket_id: int) -> bool:
+    return (db.scalar(select(func.count(PersistentVersion.id)).where(PersistentVersion.bucket_id == bucket_id)) or 0) > 0
+
+
+def storage_bucket_usage_payload(db: Session, bucket: StorageBucket) -> dict:
+    summary = storage_bucket_reference_summary(db, bucket.id)
+    return {
+        "bucket_id": bucket.id,
+        **summary,
+        "space_budget_bytes": storage_bucket_space_budget_bytes(bucket),
+    }
+
+
+def storage_bucket_payload(bucket: StorageBucket, settings: Settings, db: Session | None = None) -> dict:
+    usage_summary = storage_bucket_reference_summary(db, bucket.id) if db is not None else None
     return {
         "id": bucket.id,
         "name": bucket.name,
         "type": bucket.type,
         "is_active": bucket.is_active,
-        "config": public_storage_bucket_config(bucket),
+        "space_budget_bytes": storage_bucket_space_budget_bytes(bucket),
+        "usage_summary": usage_summary,
+        "is_config_locked": bool(usage_summary and usage_summary["file_count"] > 0),
+        "config": public_storage_bucket_config(bucket, settings),
     }
 
 
@@ -267,22 +353,70 @@ def storage_bucket_for_version(db: Session, settings: Settings, version: Persist
     return bucket
 
 
-def storage_for_bucket(bucket: StorageBucket) -> ObjectStorage:
+def storage_for_bucket(bucket: StorageBucket, settings: Settings | None = None) -> ObjectStorage:
     config = storage_bucket_config(bucket)
     if bucket.type == "local":
         return LocalObjectStorage(Path(str(config.get("path") or "./data/objects")))
     if bucket.type == "webdav":
+        password = webdav_password_from_config(settings, config) if settings is not None else str(config.get("password") or "")
         return WebDavObjectStorage(
             base_url=normalize_url_setting(config.get("base_url")),
             username=str(config.get("username") or ""),
-            password=str(config.get("password") or ""),
+            password=password,
             root_path=str(config.get("root_path") or "").strip("/"),
         )
     raise HTTPException(status_code=500, detail={"code": "unsupported_storage_bucket_type"})
 
 
+def test_storage_bucket(db: Session, settings: Settings, raw_bucket) -> None:
+    existing = db.get(StorageBucket, raw_bucket.id) if raw_bucket.id is not None else None
+    if raw_bucket.id is not None and existing is None:
+        raise HTTPException(status_code=404, detail={"code": "storage_bucket_not_found"})
+    name, bucket_type, config = normalize_storage_bucket_request(settings, raw_bucket, existing)
+    bucket = StorageBucket(
+        name=name,
+        type=bucket_type,
+        is_active=False,
+        config_json=json.dumps(config, ensure_ascii=False),
+    )
+    storage = storage_for_bucket(bucket, settings)
+    data = f"mas-unisync-storage-test:{secrets.token_hex(16)}".encode()
+    sha = hashlib.sha256(data).hexdigest()
+    object_path = ""
+    try:
+        try:
+            object_path = storage.put(0, 0, sha, data)
+        except Exception as exc:
+            raise storage_bucket_test_exception("put", exc) from exc
+        try:
+            downloaded = storage.get(object_path)
+        except Exception as exc:
+            raise storage_bucket_test_exception("get", exc) from exc
+        if downloaded != data:
+            raise HTTPException(status_code=502, detail={"code": "storage_bucket_test_mismatch"})
+    except HTTPException:
+        raise
+    finally:
+        if object_path:
+            try:
+                storage.delete(object_path)
+            except Exception as exc:
+                raise storage_bucket_test_exception("delete", exc) from exc
+
+
+def storage_bucket_test_exception(phase: str, exc: Exception) -> HTTPException:
+    detail = {
+        "code": "storage_bucket_test_failed",
+        "phase": phase,
+        "error_type": type(exc).__name__,
+    }
+    if isinstance(exc, httpx.HTTPStatusError):
+        detail["upstream_status"] = exc.response.status_code
+    return HTTPException(status_code=502, detail=detail)
+
+
 def version_storage(db: Session, settings: Settings, version: PersistentVersion) -> ObjectStorage:
-    return storage_for_bucket(storage_bucket_for_version(db, settings, version))
+    return storage_for_bucket(storage_bucket_for_version(db, settings, version), settings)
 
 
 def get_version_bytes(db: Session, settings: Settings, version: PersistentVersion) -> bytes:
@@ -296,38 +430,70 @@ def delete_version_object(db: Session, settings: Settings, bucket_id: int | None
         bucket = db.get(StorageBucket, bucket_id)
         if bucket is None:
             return
-    storage_for_bucket(bucket).delete(object_path)
+    storage_for_bucket(bucket, settings).delete(object_path)
 
 
-def normalize_storage_bucket_request(raw_bucket, existing: StorageBucket | None = None) -> tuple[str, str, dict]:
+def normalize_storage_bucket_request(settings: Settings, raw_bucket, existing: StorageBucket | None = None) -> tuple[str, str, dict]:
     name = (raw_bucket.name or "").strip()
     if not name:
         raise HTTPException(status_code=422, detail={"code": "storage_bucket_name_required"})
     bucket_type = normalize_storage_bucket_type(raw_bucket.type)
     raw_config = raw_bucket.config or {}
+    raw_budget = getattr(raw_bucket, "space_budget_bytes", None)
+    space_budget = None if raw_budget is None or raw_budget == "" else int(raw_budget)
 
     if bucket_type == "local":
         path = str(raw_config.get("path") or "").strip()
         if not path:
             raise HTTPException(status_code=422, detail={"code": "local_storage_path_required"})
-        return name, bucket_type, {"path": path}
+        return name, bucket_type, {"path": path, "space_budget_bytes": space_budget}
 
     base_url = normalize_url_setting(raw_config.get("base_url"))
     if not base_url:
         raise HTTPException(status_code=422, detail={"code": "webdav_base_url_required"})
     password = str(raw_config.get("password") or "")
     if password == "" and existing is not None and existing.type == "webdav":
-        password = str(storage_bucket_config(existing).get("password") or "")
+        password = webdav_password_from_config(settings, storage_bucket_config(existing))
     return (
         name,
         bucket_type,
         {
             "base_url": base_url,
             "username": str(raw_config.get("username") or ""),
-            "password": password,
+            "password_encrypted": encrypt_storage_secret(settings, password) if password else "",
             "root_path": str(raw_config.get("root_path") or "").strip("/"),
+            "space_budget_bytes": space_budget,
         },
     )
+
+
+def storage_bucket_connection_signature(settings: Settings, bucket_type: str, config: dict) -> tuple:
+    if bucket_type == "local":
+        return ("local", str(config.get("path") or "").strip())
+    if bucket_type == "webdav":
+        return (
+            "webdav",
+            normalize_url_setting(config.get("base_url")),
+            str(config.get("username") or ""),
+            webdav_password_from_config(settings, config),
+            str(config.get("root_path") or "").strip("/"),
+        )
+    return (bucket_type,)
+
+
+def require_storage_bucket_config_unlocked(
+    db: Session,
+    settings: Settings,
+    existing: StorageBucket,
+    bucket_type: str,
+    config: dict,
+) -> None:
+    if not storage_bucket_has_references(db, existing.id):
+        return
+    current_signature = storage_bucket_connection_signature(settings, existing.type, storage_bucket_config(existing))
+    next_signature = storage_bucket_connection_signature(settings, bucket_type, config)
+    if current_signature != next_signature:
+        raise HTTPException(status_code=409, detail={"code": "storage_bucket_config_locked"})
 
 
 def read_system_setting(db: Session, key: str) -> str | None:
@@ -378,7 +544,7 @@ def system_settings_payload(db: Session, request: Request) -> dict:
         "profile_storage_limit_bytes": profile_storage_limit_bytes(db),
         "max_active_profiles_per_account": max_active_profiles_per_account(db),
         "active_storage_bucket_id": active_bucket.id if active_bucket else None,
-        "storage_buckets": [storage_bucket_payload(bucket) for bucket in buckets],
+        "storage_buckets": [storage_bucket_payload(bucket, request.app.state.settings, db) for bucket in buckets],
     }
 
 
@@ -395,7 +561,7 @@ def save_system_settings(db: Session, request: Request, payload) -> dict:
             existing = db.get(StorageBucket, raw_bucket.id) if raw_bucket.id is not None else None
             if raw_bucket.id is not None and existing is None:
                 raise HTTPException(status_code=404, detail={"code": "storage_bucket_not_found"})
-            name, bucket_type, config = normalize_storage_bucket_request(raw_bucket, existing)
+            name, bucket_type, config = normalize_storage_bucket_request(request.app.state.settings, raw_bucket, existing)
             if existing is None:
                 existing = StorageBucket(
                     name=name,
@@ -408,6 +574,13 @@ def save_system_settings(db: Session, request: Request, payload) -> dict:
                 db.add(existing)
                 db.flush()
             else:
+                require_storage_bucket_config_unlocked(
+                    db,
+                    request.app.state.settings,
+                    existing,
+                    bucket_type,
+                    config,
+                )
                 existing.name = name
                 existing.type = bucket_type
                 existing.config_json = json.dumps(config, ensure_ascii=False)
@@ -426,17 +599,87 @@ def save_system_settings(db: Session, request: Request, payload) -> dict:
     return system_settings_payload(db, request)
 
 
-def delete_storage_bucket(db: Session, settings: Settings, bucket_id: int) -> None:
+def delete_storage_bucket(db: Session, settings: Settings, bucket_id: int) -> dict:
     default_bucket = ensure_default_storage_bucket(db, settings)
     bucket = db.get(StorageBucket, bucket_id)
     if bucket is None:
         raise HTTPException(status_code=404, detail={"code": "storage_bucket_not_found"})
-    referenced = db.scalar(
-        select(func.count(PersistentVersion.id)).where(PersistentVersion.bucket_id == bucket.id)
-    ) or 0
-    if bucket.id == default_bucket.id or bucket.is_active or referenced > 0:
+    if bucket.id == default_bucket.id:
         raise HTTPException(status_code=409, detail={"code": "storage_bucket_in_use"})
+
+    old_storage = storage_for_bucket(bucket, settings)
+    local_storage = storage_for_bucket(default_bucket, settings)
+    summary = {
+        "deleted_backup_count": 0,
+        "migrated_current_count": 0,
+        "removed_current_count": 0,
+        "deleted_version_count": 0,
+    }
+
+    if bucket.is_active:
+        default_bucket.is_active = True
+        default_bucket.updated_at = utc_now()
+        bucket.is_active = False
+
+    backup_rows = list(
+        db.scalars(
+            select(PersistentDailyBackup)
+            .join(PersistentVersion, PersistentVersion.id == PersistentDailyBackup.version_id)
+            .where(PersistentVersion.bucket_id == bucket.id)
+        )
+    )
+    for backup in backup_rows:
+        db.delete(backup)
+    summary["deleted_backup_count"] = len(backup_rows)
+
+    current_rows = list(
+        db.execute(
+            select(PersistentCurrent, PersistentVersion)
+            .join(PersistentVersion, PersistentVersion.id == PersistentCurrent.version_id)
+            .where(PersistentVersion.bucket_id == bucket.id)
+        )
+    )
+    for current, version in current_rows:
+        try:
+            data = old_storage.get(version.object_path)
+        except Exception:
+            db.delete(current)
+            summary["removed_current_count"] += 1
+            continue
+        migrated = PersistentVersion(
+            profile_id=version.profile_id,
+            bucket_id=default_bucket.id,
+            object_path="pending",
+            sha256=version.sha256,
+            size=version.size,
+            renpy_version=version.renpy_version,
+            mas_version=version.mas_version,
+            created_at=version.created_at,
+        )
+        db.add(migrated)
+        db.flush()
+        migrated.object_path = local_storage.put(migrated.profile_id, migrated.id, migrated.sha256, data)
+        current.version_id = migrated.id
+        current.updated_at = utc_now()
+        summary["migrated_current_count"] += 1
+
+    db.flush()
+    referenced_by_backup = select(PersistentDailyBackup.version_id)
+    referenced_by_current = select(PersistentCurrent.version_id)
+    old_versions = list(
+        db.scalars(
+            select(PersistentVersion).where(
+                PersistentVersion.bucket_id == bucket.id,
+                PersistentVersion.id.not_in(referenced_by_backup),
+                PersistentVersion.id.not_in(referenced_by_current),
+            )
+        )
+    )
+    for version in old_versions:
+        db.delete(version)
+    summary["deleted_version_count"] = len(old_versions)
     db.delete(bucket)
+    return summary
 
 
 def active_ban(db: Session, target_type: str, target_id: int, now: datetime) -> Ban | None:
@@ -555,7 +798,7 @@ def store_upload(
     sha = hashlib.sha256(data).hexdigest()
     backup_date = now.date()
     bucket = active_storage_bucket(db, settings)
-    storage = storage_for_bucket(bucket)
+    storage = storage_for_bucket(bucket, settings)
     backup = db.scalar(
         select(PersistentDailyBackup).where(
             PersistentDailyBackup.profile_id == profile.id,

@@ -18,9 +18,10 @@ def test_webdav_storage_put_get_delete_uses_encoded_paths_and_auth(monkeypatch):
     clients = []
 
     class FakeClient:
-        def __init__(self, *, timeout, auth):
+        def __init__(self, *, timeout, auth, follow_redirects):
             self.timeout = timeout
             self.auth = auth
+            self.follow_redirects = follow_redirects
             self.closed = False
             clients.append(self)
 
@@ -58,7 +59,10 @@ def test_webdav_storage_put_get_delete_uses_encoded_paths_and_auth(monkeypatch):
     assert object_path == "7/ab/3-abcdef123456.bin"
     assert downloaded == b"downloaded"
     assert clients
-    assert all(client.timeout == 12.5 and client.auth == ("mas", "secret") for client in clients)
+    assert all(
+        client.timeout == 12.5 and client.auth == ("mas", "secret") and client.follow_redirects is True
+        for client in clients
+    )
     assert all(client.closed for client in clients)
     assert calls == [
         ("MKCOL", "https://dav.example.test/root/persistent%20saves/7", None),

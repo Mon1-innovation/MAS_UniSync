@@ -104,11 +104,26 @@ export interface SystemSettingsResponse {
 
 export type StorageBucketType = 'local' | 'webdav'
 
+export interface StorageBucketUsageSummary {
+  file_count: number
+  total_size: number
+  backup_reference_count: number
+  current_reference_count: number
+}
+
+export interface StorageBucketUsage extends StorageBucketUsageSummary {
+  bucket_id: number
+  space_budget_bytes: number | null
+}
+
 export interface StorageBucket {
   id?: number
   name: string
   type: StorageBucketType
   is_active: boolean
+  space_budget_bytes?: number | null
+  usage_summary?: StorageBucketUsageSummary | null
+  is_config_locked?: boolean
   config: {
     path?: string
     base_url?: string

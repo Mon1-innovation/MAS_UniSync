@@ -7,6 +7,8 @@ import type {
   Profile,
   ProfileResponse,
   StatusResponse,
+  StorageBucket,
+  StorageBucketUsage,
   SystemSettings,
   SystemSettingsResponse,
   UserResponse,
@@ -101,10 +103,45 @@ export function getAdminSettings() {
 export function updateAdminSettings(settings: SystemSettings) {
   return request<SystemSettingsResponse>('/admin/settings', {
     method: 'PUT',
-    body: {...settings},
+    body: {
+      ...settings,
+      storage_buckets: settings.storage_buckets?.map(storageBucketRequestBody),
+    },
   })
 }
 
+export function testStorageBucket(bucket: StorageBucket) {
+  return request<StatusResponse>('/admin/storage-buckets/test', {
+    method: 'POST',
+    body: storageBucketRequestBody(bucket),
+  })
+}
+
+export function getStorageBucketUsage(bucketId: number) {
+  return request<StorageBucketUsage>(`/admin/storage-buckets/${bucketId}/usage`)
+}
+
 export function deleteStorageBucket(bucketId: number) {
-  return request<void>(`/admin/storage-buckets/${bucketId}`, {method: 'DELETE'})
+  return request<void>(`/admin/storage-buckets/${bucketId}?confirm=true`, {method: 'DELETE'})
+}
+
+function storageBucketRequestBody(bucket: StorageBucket) {
+  return {
+    id: bucket.id,
+    name: bucket.name,
+    type: bucket.type,
+    is_active: bucket.is_active,
+    space_budget_bytes: bucket.space_budget_bytes ?? null,
+    config:
+      bucket.type === 'webdav'
+        ? {
+            base_url: bucket.config.base_url ?? '',
+            username: bucket.config.username ?? '',
+            password: bucket.config.password ?? '',
+            root_path: bucket.config.root_path ?? '',
+          }
+        : {
+            path: bucket.config.path ?? '',
+          },
+  }
 }

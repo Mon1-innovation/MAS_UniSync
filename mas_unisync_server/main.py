@@ -12,7 +12,7 @@ from starlette.middleware.sessions import SessionMiddleware
 from .auth import admin_user, current_user, get_db
 from .database import Base, make_engine, make_sessionmaker
 from .flarum import FlarumClient
-from .models import AuditLog, Ban, Lock, PersistentDailyBackup, PersistentVersion, Profile, User
+from .models import AuditLog, Ban, Lock, PersistentDailyBackup, PersistentVersion, Profile, StorageBucket, User
 from .services import (
     active_ban,
     active_ban_status,
@@ -40,14 +40,16 @@ from .services import (
     restore_backup,
     save_system_settings,
     store_upload,
+    storage_bucket_usage_payload,
     system_settings_payload,
+    test_storage_bucket,
     upsert_flarum_user,
     user_payload,
     utc_now,
     user_storage_usage,
     version_payload,
 )
-from .schemas import BanRequest, LoginRequest, ProfileCreateRequest, SystemSettingsRequest
+from .schemas import BanRequest, LoginRequest, ProfileCreateRequest, StorageBucketRequest, SystemSettingsRequest
 from .settings import Settings
 from .storage import LocalObjectStorage
 
@@ -491,17 +493,41 @@ def create_app(settings: Settings | None = None, flarum_client=None) -> FastAPI:
         db.commit()
         return {"settings": settings_payload}
 
-    @app.delete("/admin/storage-buckets/{bucket_id}", status_code=204)
+    @app.post("/admin/storage-buckets/test")
+    def admin_test_storage_bucket(
+        payload: StorageBucketRequest,
+        request: Request,
+        _: User = Depends(admin_user),
+        db: Session = Depends(get_db),
+    ):
+        test_storage_bucket(db, request.app.state.settings, payload)
+        return {"status": "ok"}
+
+    @app.get("/admin/storage-buckets/{bucket_id}/usage")
+    def admin_storage_bucket_usage(
+        bucket_id: int,
+        _: User = Depends(admin_user),
+        db: Session = Depends(get_db),
+    ):
+        bucket = db.get(StorageBucket, bucket_id)
+        if bucket is None:
+            raise HTTPException(status_code=404, detail={"code": "storage_bucket_not_found"})
+        return storage_bucket_usage_payload(db, bucket)
+
+    @app.delete("/admin/storage-buckets/{bucket_id}")
     def admin_delete_storage_bucket(
         bucket_id: int,
         request: Request,
+        confirm: bool = False,
         actor: User = Depends(admin_user),
         db: Session = Depends(get_db),
     ):
-        delete_storage_bucket(db, request.app.state.settings, bucket_id)
+        if not confirm:
+            raise HTTPException(status_code=400, detail={"code": "storage_bucket_delete_confirmation_required"})
+        summary = delete_storage_bucket(db, request.app.state.settings, bucket_id)
         audit(db, request, actor, "admin.storage_bucket.delete")
         db.commit()
-        return Response(status_code=204)
+        return summary
 
     @app.get("/admin/users/{user_id}")
     def admin_get_user(

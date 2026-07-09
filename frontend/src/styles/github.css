@@ -382,6 +382,14 @@ input:focus-visible {
   border-color: var(--brand);
 }
 
+.field input:disabled,
+.field select:disabled {
+  color: var(--muted);
+  border-color: var(--border);
+  background: #f6f8fa;
+  cursor: not-allowed;
+}
+
 .search-box {
   position: relative;
   width: min(100%, 360px);
@@ -866,7 +874,26 @@ tbody tr:hover {
 
 .storage-bucket-actions {
   display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
   align-items: end;
+}
+
+.storage-bucket-usage {
+  grid-column: 1 / -1;
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(148px, 1fr));
+  gap: 8px;
+  color: var(--muted);
+  font-size: 13px;
+}
+
+.storage-bucket-usage span {
+  min-height: 32px;
+  padding: 7px 9px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: #fff;
 }
 
 @media (max-width: 720px) {

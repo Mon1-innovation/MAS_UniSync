@@ -1,4 +1,4 @@
-import {render, screen, waitFor} from '@testing-library/react'
+import {render, screen, waitFor, within} from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import {afterEach, beforeEach, describe, expect, it, vi} from 'vitest'
 import {MemoryRouter} from 'react-router-dom'
@@ -1102,7 +1102,7 @@ describe('App', () => {
       profile_storage_limit_bytes: 20971520,
       max_active_profiles_per_account: 4,
       active_storage_bucket_id: 1,
-      storage_buckets: [defaultBucket],
+      storage_buckets: [{...defaultBucket, space_budget_bytes: null}],
     })
   })
 
@@ -1181,11 +1181,12 @@ describe('App', () => {
 
     await expect(screen.findByText(/(settings saved|设置已保存)/i)).resolves.toBeInTheDocument()
     expect(submittedBody.storage_buckets).toEqual([
-      {...defaultBucket, is_active: false},
+      {...defaultBucket, is_active: false, space_budget_bytes: null},
       {
         name: 'Primary WebDAV',
         type: 'webdav',
         is_active: true,
+        space_budget_bytes: null,
         config: {
           base_url: 'https://dav.example.test/root/',
           username: 'mas',
@@ -1195,5 +1196,281 @@ describe('App', () => {
       },
     ])
     expect(submittedBody.active_storage_bucket_id).toBeNull()
+  })
+
+  it('allows admins to test storage bucket read and write from settings', async () => {
+    localStorage.setItem('mas_unisync_user', JSON.stringify(adminUser))
+    let submittedBody: any
+    const defaultBucket = {
+      id: 1,
+      name: 'Docker local storage',
+      type: 'local',
+      is_active: true,
+      config: {path: './data/objects'},
+    }
+    mockFetch((input, init) => {
+      if (input === '/account/profile-keys') {
+        return json({items: []})
+      }
+      if (input === '/admin/settings' && !init?.method) {
+        return json({
+          settings: {
+            backend_api_url: 'https://api.example.test',
+            frontend_web_url: 'https://portal.example.test',
+            profile_storage_limit_bytes: 10485760,
+            max_active_profiles_per_account: 3,
+            active_storage_bucket_id: 1,
+            storage_buckets: [defaultBucket],
+          },
+        })
+      }
+      if (input === '/admin/storage-buckets/test' && init?.method === 'POST') {
+        submittedBody = JSON.parse(String(init.body))
+        return json({status: 'ok'})
+      }
+      return json({detail: {code: 'not_found'}}, {status: 404})
+    })
+
+    render(
+      <MemoryRouter initialEntries={['/admin/settings']}>
+        <App />
+      </MemoryRouter>,
+    )
+
+    await screen.findByRole('heading', {level: 1, name: /(settings|设置)/i})
+    await userEvent.click(screen.getByRole('button', {name: /(test read\/write|测试读写)/i}))
+
+    await expect(screen.findByText(/(storage bucket read\/write test passed|存储桶读写测试通过)/i)).resolves.toBeInTheDocument()
+    expect(submittedBody).toEqual({...defaultBucket, space_budget_bytes: null})
+  })
+
+  it('shows storage bucket test diagnostics when read and write test fails', async () => {
+    localStorage.setItem('mas_unisync_user', JSON.stringify(adminUser))
+    const defaultBucket = {
+      id: 1,
+      name: 'Docker local storage',
+      type: 'local',
+      is_active: true,
+      config: {path: './data/objects'},
+    }
+    mockFetch((input, init) => {
+      if (input === '/account/profile-keys') {
+        return json({items: []})
+      }
+      if (input === '/admin/settings' && !init?.method) {
+        return json({
+          settings: {
+            backend_api_url: 'https://api.example.test',
+            frontend_web_url: 'https://portal.example.test',
+            profile_storage_limit_bytes: 10485760,
+            max_active_profiles_per_account: 3,
+            active_storage_bucket_id: 1,
+            storage_buckets: [defaultBucket],
+          },
+        })
+      }
+      if (input === '/admin/storage-buckets/test' && init?.method === 'POST') {
+        return json(
+          {detail: {code: 'storage_bucket_test_failed', phase: 'get', error_type: 'ConnectTimeout'}},
+          {status: 502},
+        )
+      }
+      return json({detail: {code: 'not_found'}}, {status: 404})
+    })
+
+    render(
+      <MemoryRouter initialEntries={['/admin/settings']}>
+        <App />
+      </MemoryRouter>,
+    )
+
+    await screen.findByRole('heading', {level: 1, name: /(settings|设置)/i})
+    await userEvent.click(screen.getByRole('button', {name: /(test read\/write|测试读写)/i}))
+
+    await expect(screen.findByText(/storage_bucket_test_failed.*phase=get.*error=ConnectTimeout/i)).resolves.toBeInTheDocument()
+  })
+
+  it('shows storage bucket usage and keeps referenced connection fields locked', async () => {
+    localStorage.setItem('mas_unisync_user', JSON.stringify(adminUser))
+    let submittedBody: any
+    const webdavBucket = {
+      id: 2,
+      name: 'Archive WebDAV',
+      type: 'webdav',
+      is_active: false,
+      space_budget_bytes: 2048,
+      usage_summary: {
+        file_count: 2,
+        total_size: 12,
+        backup_reference_count: 2,
+        current_reference_count: 1,
+      },
+      is_config_locked: true,
+      config: {
+        base_url: 'https://dav.example.test/root',
+        username: 'mas',
+        root_path: 'persistent',
+        has_password: true,
+      },
+    }
+    mockFetch((input, init) => {
+      if (input === '/account/profile-keys') {
+        return json({items: []})
+      }
+      if (input === '/admin/settings' && !init?.method) {
+        return json({
+          settings: {
+            backend_api_url: 'https://api.example.test',
+            frontend_web_url: 'https://portal.example.test',
+            profile_storage_limit_bytes: 10485760,
+            max_active_profiles_per_account: 3,
+            active_storage_bucket_id: 1,
+            storage_buckets: [
+              {
+                id: 1,
+                name: 'Docker local storage',
+                type: 'local',
+                is_active: true,
+                space_budget_bytes: null,
+                usage_summary: {file_count: 0, total_size: 0, backup_reference_count: 0, current_reference_count: 0},
+                is_config_locked: false,
+                config: {path: './data/objects'},
+              },
+              webdavBucket,
+            ],
+          },
+        })
+      }
+      if (input === '/admin/storage-buckets/2/usage') {
+        return json({
+          bucket_id: 2,
+          file_count: 2,
+          total_size: 12,
+          backup_reference_count: 2,
+          current_reference_count: 1,
+          space_budget_bytes: 2048,
+        })
+      }
+      if (input === '/admin/settings' && init?.method === 'PUT') {
+        submittedBody = JSON.parse(String(init.body))
+        return json({
+          settings: {
+            backend_api_url: 'https://api.example.test',
+            frontend_web_url: 'https://portal.example.test',
+            profile_storage_limit_bytes: 10485760,
+            max_active_profiles_per_account: 3,
+            active_storage_bucket_id: 1,
+            storage_buckets: [{...webdavBucket, name: 'Archive Renamed', space_budget_bytes: 4096}],
+          },
+        })
+      }
+      return json({detail: {code: 'not_found'}}, {status: 404})
+    })
+
+    render(
+      <MemoryRouter initialEntries={['/admin/settings']}>
+        <App />
+      </MemoryRouter>,
+    )
+
+    await screen.findByRole('heading', {level: 1, name: /(settings|设置)/i})
+    expect(screen.getByLabelText(/(webdav url|WebDAV URL)/i)).toBeDisabled()
+    expect(screen.getByLabelText(/(webdav username|WebDAV 用户名)/i)).toBeDisabled()
+    expect(screen.getByLabelText(/(webdav password|WebDAV 密码)/i)).toBeDisabled()
+    expect(screen.getByLabelText(/(webdav root path|WebDAV 根路径)/i)).toBeDisabled()
+    expect(screen.getByLabelText(/(bucket name|存储桶名称)/i)).toBeEnabled()
+    const budgetInput = screen.getAllByLabelText(/(space budget|可用空间预算)/i)[1]
+    expect(budgetInput).toBeEnabled()
+
+    await userEvent.click(screen.getAllByRole('button', {name: /(usage info|使用信息)/i})[1])
+    await expect(screen.findByText(/(files|文件).*2/i)).resolves.toBeInTheDocument()
+    expect(screen.getByText(/12 B/)).toBeInTheDocument()
+    expectFetchCalled('/admin/storage-buckets/2/usage')
+
+    await userEvent.clear(screen.getByLabelText(/(bucket name|存储桶名称)/i))
+    await userEvent.type(screen.getByLabelText(/(bucket name|存储桶名称)/i), 'Archive Renamed')
+    await userEvent.clear(budgetInput)
+    await userEvent.type(budgetInput, '4096')
+    await userEvent.click(screen.getByRole('button', {name: /(save settings|保存设置)/i}))
+
+    await expect(screen.findByText(/(settings saved|设置已保存)/i)).resolves.toBeInTheDocument()
+    expect(submittedBody.storage_buckets[1]).toMatchObject({
+      id: 2,
+      name: 'Archive Renamed',
+      space_budget_bytes: 4096,
+      config: {
+        base_url: 'https://dav.example.test/root',
+        username: 'mas',
+        password: '',
+        root_path: 'persistent',
+      },
+    })
+  })
+
+  it('confirms storage bucket deletion and calls the confirmed delete endpoint', async () => {
+    localStorage.setItem('mas_unisync_user', JSON.stringify(adminUser))
+    const defaultBucket = {
+      id: 1,
+      name: 'Docker local storage',
+      type: 'local',
+      is_active: true,
+      config: {path: './data/objects'},
+    }
+    const archiveBucket = {
+      id: 2,
+      name: 'Archive WebDAV',
+      type: 'webdav',
+      is_active: false,
+      is_config_locked: true,
+      space_budget_bytes: null,
+      usage_summary: {file_count: 1, total_size: 6, backup_reference_count: 1, current_reference_count: 0},
+      config: {
+        base_url: 'https://dav.example.test/root',
+        username: 'mas',
+        root_path: 'persistent',
+        has_password: true,
+      },
+    }
+    mockFetch((input, init) => {
+      if (input === '/account/profile-keys') {
+        return json({items: []})
+      }
+      if (input === '/admin/settings' && !init?.method) {
+        return json({
+          settings: {
+            backend_api_url: 'https://api.example.test',
+            frontend_web_url: 'https://portal.example.test',
+            profile_storage_limit_bytes: 10485760,
+            max_active_profiles_per_account: 3,
+            active_storage_bucket_id: 1,
+            storage_buckets: [defaultBucket, archiveBucket],
+          },
+        })
+      }
+      if (input === '/admin/storage-buckets/2?confirm=true' && init?.method === 'DELETE') {
+        return json({
+          deleted_backup_count: 1,
+          migrated_current_count: 0,
+          removed_current_count: 0,
+          deleted_version_count: 1,
+        })
+      }
+      return json({detail: {code: 'not_found'}}, {status: 404})
+    })
+
+    render(
+      <MemoryRouter initialEntries={['/admin/settings']}>
+        <App />
+      </MemoryRouter>,
+    )
+
+    await screen.findByText('Archive WebDAV')
+    const deleteButtons = screen.getAllByRole('button', {name: /(delete bucket|删除存储桶)/i})
+    await userEvent.click(deleteButtons.find((button) => !button.hasAttribute('disabled')) as HTMLElement)
+    expect(screen.getByText(/(object files will not be deleted|实际对象文件不会被删除)/i)).toBeInTheDocument()
+    await userEvent.click(within(screen.getByRole('dialog')).getByRole('button', {name: /^(delete bucket|删除存储桶)$/i}))
+
+    await waitFor(() => expect(screen.queryByText('Archive WebDAV')).not.toBeInTheDocument())
+    expectFetchCalled('/admin/storage-buckets/2?confirm=true', {method: 'DELETE'})
   })
 })

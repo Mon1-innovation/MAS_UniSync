@@ -88,7 +88,7 @@ class WebDavObjectStorage:
 
     def _client(self) -> httpx.Client:
         auth = (self.username, self.password) if self.username else None
-        return httpx.Client(timeout=self.timeout, auth=auth)
+        return httpx.Client(timeout=self.timeout, auth=auth, follow_redirects=True)
 
     def _url(self, object_path: str) -> str:
         pieces = [self.base_url]

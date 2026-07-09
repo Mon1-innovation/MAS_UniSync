@@ -142,7 +142,7 @@ http://127.0.0.1:5173
 
 管理员可以在后台设置页添加 WebDAV 存储桶并选择活动存储桶。切换活动存储桶只影响新的上传；已有 `persistent` 版本和每日备份会继续从原存储桶读取，不会自动迁移。
 
-WebDAV 密码会保存到后端数据库，但后台设置接口不会回显明文密码；编辑 WebDAV 存储桶时密码留空表示保持原密码。
+WebDAV 密码会使用 `SESSION_SECRET` 派生的密钥加密后保存到后端数据库，后台设置接口不会回显明文密码；编辑 WebDAV 存储桶时密码留空表示保持原密码。生产环境不要更换 `SESSION_SECRET`，否则已有 WebDAV 密码将无法解密，需要重新填写。
 
 如果是在已有生产数据库上升级，需要确保 `persistent_versions` 表包含 nullable `bucket_id` 列，并创建 `storage_buckets` 表。当前服务启动会为缺失的 `bucket_id` 做轻量补列，新表由 SQLAlchemy `create_all` 创建。
 

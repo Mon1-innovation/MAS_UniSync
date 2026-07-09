@@ -23,6 +23,7 @@ class StorageBucketRequest(BaseModel):
     name: str
     type: Literal["local", "webdav"]
     is_active: bool | None = None
+    space_budget_bytes: int | None = Field(default=None, ge=0)
     config: dict[str, Any] = Field(default_factory=dict)
 
 
