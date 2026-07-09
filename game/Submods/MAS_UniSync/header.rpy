@@ -162,6 +162,8 @@ init -989 python:
                 mas_unisync_flush_api_keys()
         except Exception:
             pass
+        globals()["mas_unisync_lock_not_held"] = False
+        globals()["mas_unisync_startup_failed"] = False
         mas_unisync_update_status(message="")
         mas_unisync_status["sync_status"] = "disabled"
         mas_unisync_status["lock_state"] = "unlocked"
@@ -197,6 +199,7 @@ init -989 python:
             "locked": _("已锁定"),
             "unlocked": _("未锁定"),
             "released": _("已释放"),
+            "startup_failed": _("连接失败"),
         }
         return labels.get(value, value)
 
@@ -418,6 +421,30 @@ screen mas_unisync_lock_not_held_warning():
 screen mas_unisync_lock_not_held_overlay():
     if mas_unisync_lock_not_held:
         use mas_unisync_lock_not_held_warning
+
+screen mas_unisync_startup_failure_notice():
+    zorder 221
+    frame:
+        align (0.98, 0.04)
+        xmaximum 520
+        padding (14, 12)
+        vbox:
+            spacing 8
+            text _("MAS UniSync 连接失败"):
+                style "main_menu_version"
+            text _("当前会话无法保存，因为连接至 UniSync 服务器失败。"):
+                style "main_menu_version"
+                size 16
+            text _("清除 UniSync API key 以禁用 UniSync。或者修复你的网络问题后重启。"):
+                style "main_menu_version"
+                size 16
+            textbutton _("退出游戏"):
+                style "mas_button_simple"
+                action Function(renpy.quit, relaunch=False)
+
+screen mas_unisync_startup_failure_overlay():
+    if mas_unisync_startup_failed:
+        use mas_unisync_startup_failure_notice
 
 screen mas_unisync_settingpane():
     python:

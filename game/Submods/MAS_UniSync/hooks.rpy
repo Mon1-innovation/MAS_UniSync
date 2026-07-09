@@ -1,4 +1,5 @@
 init -968 python:
+    import mas_unisync_http
     import mas_unisync_sync
     import os
     import sys
@@ -12,6 +13,7 @@ init -968 python:
     mas_unisync_stop_event = threading.Event()
     mas_unisync_original_persistent_save = None
     mas_unisync_lock_not_held = False
+    mas_unisync_startup_failed = False
 
     def mas_unisync_savedir():
         return renpy.config.savedir
@@ -73,10 +75,26 @@ init -968 python:
         except Exception:
             pass
         mas_unisync_core.submod_log_error(message)
+        return None
+
+    def mas_unisync_enter_startup_failure_mode(reason=None):
+        global mas_unisync_startup_failed
+        mas_unisync_startup_failed = True
+        message = "当前会话无法保存，因为连接至 UniSync 服务器失败。请清除 UniSync API key 以禁用 UniSync。"
+        if reason is not None:
+            message = message + " " + mas_unisync_core.text_type(reason)
+        mas_unisync_status["sync_status"] = "disabled"
+        mas_unisync_status["lock_state"] = "startup_failed"
+        mas_unisync_status["last_error"] = mas_unisync_core.renpy_safe_text(message)
         try:
-            renpy.show_screen("mas_unisync_lock_not_held_warning")
+            if mas_unisync_session is not None:
+                mas_unisync_session.status.enabled = False
+                mas_unisync_session.status.lock_state = "startup_failed"
+                mas_unisync_session.status.lease_token = ""
+                mas_unisync_session.status.mark_error_full(message)
         except Exception:
             pass
+        mas_unisync_core.submod_log_error(message)
         return None
 
     def mas_unisync_start_heartbeat():
@@ -101,10 +119,11 @@ init -968 python:
         mas_unisync_heartbeat_thread.start()
 
     def mas_unisync_startup_sync(force=False, raise_on_failure=False, upload_after_sync=False, load_remote_into_memory=False):
-        global mas_unisync_session, mas_unisync_lock_not_held
+        global mas_unisync_session, mas_unisync_lock_not_held, mas_unisync_startup_failed
         profile_key = mas_unisync_get_profile_key()
         if not profile_key:
             mas_unisync_lock_not_held = False
+            mas_unisync_startup_failed = False
             mas_unisync_update_status(message="")
             mas_unisync_status["sync_status"] = "disabled"
             mas_unisync_status["lock_state"] = "unlocked"
@@ -115,15 +134,19 @@ init -968 python:
         try:
             mas_unisync_session.start(upload_after_sync=upload_after_sync, load_remote_into_memory=load_remote_into_memory)
             mas_unisync_lock_not_held = False
+            mas_unisync_startup_failed = False
             mas_unisync_update_status(mas_unisync_session.status)
-            try:
-                renpy.hide_screen("mas_unisync_lock_not_held_warning")
-            except Exception:
-                pass
             mas_unisync_start_heartbeat()
             return mas_unisync_session
         except mas_unisync_core.UniSyncLockNotHeldError as exc:
             return mas_unisync_enter_lock_not_held_mode(exc)
+        except (mas_unisync_http.UniSyncHTTPError, mas_unisync_core.UniSyncError) as exc:
+            mas_unisync_core.submod_log_debug(str(exc))
+            mas_unisync_session.status.mark_error(exc)
+            mas_unisync_update_status(mas_unisync_session.status)
+            if raise_on_failure:
+                raise
+            return mas_unisync_enter_startup_failure_mode(exc)
         except Exception as exc:
             mas_unisync_core.submod_log_debug(str(exc))
             mas_unisync_session.status.mark_error(exc)
@@ -133,6 +156,10 @@ init -968 python:
             return None
 
     def mas_unisync_validate_persistent_for_upload(raise_on_failure=False):
+        if mas_unisync_startup_failed:
+            if raise_on_failure:
+                raise mas_unisync_core.UniSyncError("startup connection to UniSync server failed")
+            return False
         if mas_unisync_lock_not_held:
             if raise_on_failure:
                 raise mas_unisync_core.UniSyncLockNotHeldError("sync lock is not held")
@@ -195,6 +222,8 @@ init -968 python:
         return None
 
     def mas_unisync_upload_now(raise_on_failure=False, force=False):
+        if mas_unisync_startup_failed:
+            return None
         if mas_unisync_lock_not_held:
             return None
         if not mas_unisync_validate_persistent_for_upload(raise_on_failure=raise_on_failure):
@@ -216,6 +245,8 @@ init -968 python:
 
     def mas_unisync_enqueue_upload():
         global mas_unisync_upload_thread
+        if mas_unisync_startup_failed:
+            return
         if mas_unisync_lock_not_held:
             return
         if mas_unisync_session is None or not mas_unisync_session.status.enabled:
@@ -239,6 +270,8 @@ init -968 python:
         mas_unisync_upload_thread.start()
 
     def mas_unisync_wrapped_persistent_save():
+        if mas_unisync_startup_failed:
+            return None
         if mas_unisync_lock_not_held:
             return None
         if not mas_unisync_guard_enabled():
@@ -262,10 +295,14 @@ init -968 python:
         try:
             if "mas_unisync_lock_not_held_overlay" not in config.overlay_screens:
                 config.overlay_screens.append("mas_unisync_lock_not_held_overlay")
+            if "mas_unisync_startup_failure_overlay" not in config.overlay_screens:
+                config.overlay_screens.append("mas_unisync_startup_failure_overlay")
         except Exception:
             pass
 
     def mas_unisync_shutdown():
+        if mas_unisync_startup_failed:
+            return
         if mas_unisync_lock_not_held:
             return
         mas_unisync_stop_event.set()
@@ -296,6 +333,8 @@ init -968 python:
 init python:
     @store.mas_submod_utils.functionplugin("_quit", priority=-100)
     def mas_unisync_on_quit():
+        if mas_unisync_startup_failed:
+            return
         if mas_unisync_lock_not_held:
             return
         if not mas_unisync_guard_enabled():

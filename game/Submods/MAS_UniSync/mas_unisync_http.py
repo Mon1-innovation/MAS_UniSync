@@ -20,6 +20,9 @@ class UniSyncHTTPError(Exception):
         self.code = code
 
 
+DEFAULT_TIMEOUT = 10
+
+
 def generate_multipart_boundary():
     try:
         random_bytes = os.urandom(16)
@@ -113,7 +116,7 @@ def make_request(method, url, headers=None, data=None):
         return request
 
 
-def request(method, url, headers=None, data=None, timeout=30, urlopen=None):
+def request(method, url, headers=None, data=None, timeout=DEFAULT_TIMEOUT, urlopen=None):
     urlopen = urlopen or urllib_request.urlopen
     req = make_request(method, url, headers=headers, data=data)
     try:
@@ -145,6 +148,6 @@ def request(method, url, headers=None, data=None, timeout=30, urlopen=None):
     return status, body
 
 
-def request_json(method, url, headers=None, data=None, timeout=30, urlopen=None):
+def request_json(method, url, headers=None, data=None, timeout=DEFAULT_TIMEOUT, urlopen=None):
     _status, body = request(method, url, headers=headers, data=data, timeout=timeout, urlopen=urlopen)
     return parse_json_body(body)

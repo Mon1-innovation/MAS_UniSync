@@ -136,9 +136,11 @@ def test_sync_session_uses_complete_api_url_without_adding_fixed_port(tmp_path):
 def test_fetch_profile_keys_url_requests_public_config_from_api_url():
     sync = load_client_module("mas_unisync_sync")
     requests = []
+    timeouts = []
 
     def fake_urlopen(request, timeout):
         requests.append(request)
+        timeouts.append(timeout)
         if request.full_url == "https://api.example.test/root/v1/config/web-url":
             return FakeResponse(
                 200,
@@ -153,6 +155,43 @@ def test_fetch_profile_keys_url_requests_public_config_from_api_url():
 
     assert result == "https://portal.example.test/account/profile-keys"
     assert len(requests) == 1
+    assert timeouts == [10]
+
+
+def test_sync_session_requests_use_ten_second_timeout(tmp_path):
+    sync = load_client_module("mas_unisync_sync")
+    persistent = tmp_path / "persistent"
+    persistent.write_bytes(b"local")
+    timeouts = []
+
+    def fake_urlopen(request, timeout):
+        timeouts.append(timeout)
+        if request.full_url.endswith("/v1/profile/resolve"):
+            return FakeResponse(200, {"profile": {"id": 7}})
+        if request.full_url.endswith("/v1/locks/acquire"):
+            return FakeResponse(200, {"lease_token": "lease_123"})
+        if request.full_url.endswith("/v1/persistent/current"):
+            raise HTTPError(
+                request.full_url,
+                404,
+                "Not Found",
+                hdrs=None,
+                fp=FakeResponse(404, {"detail": {"code": "no_current_persistent"}}),
+            )
+        if request.full_url.endswith("/v1/persistent/upload"):
+            return FakeResponse(201, {"sha256": "localhash", "created_at": "2026-01-01T00:00:00Z"})
+        raise AssertionError(f"unexpected URL {request.full_url}")
+
+    session = sync.SyncSession(
+        "100.72.137.92",
+        "maspk_test",
+        str(persistent),
+        str(tmp_path / "backups"),
+        urlopen=fake_urlopen,
+    )
+    session.start(upload_after_sync=True)
+
+    assert timeouts == [10, 10, 10, 10]
 
 
 def test_acquire_lock_raises_lock_not_held_error_when_server_reports_conflict(tmp_path):

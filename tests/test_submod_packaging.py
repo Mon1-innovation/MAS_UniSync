@@ -336,10 +336,13 @@ def test_lock_not_held_mode_blocks_save_upload_and_shows_quit_prompt():
     assert 'MAS_UNISYNC_LOCK_NOT_HELD_CHKSUM = "Unisync_lock_not_held"' in hooks_source
     assert "mas_unisync_enter_lock_not_held_mode" in hooks_source
     assert "persistent._mas_moni_chksum = MAS_UNISYNC_LOCK_NOT_HELD_CHKSUM" in hooks_source
-    assert 'renpy.show_screen("mas_unisync_lock_not_held_warning")' in hooks_source
     assert 'config.overlay_screens.append("mas_unisync_lock_not_held_overlay")' in hooks_source
     assert "except mas_unisync_core.UniSyncLockNotHeldError as exc:" in hooks_source
     assert "mas_unisync_enter_lock_not_held_mode(exc)" in hooks_source
+    assert 'renpy.show_screen("mas_unisync_lock_not_held_warning")' not in hooks_source
+    assert 'renpy.hide_screen("mas_unisync_lock_not_held_warning")' not in hooks_source
+    assert 'renpy.show_screen("mas_unisync_lock_not_held_warning")' not in header_source
+    assert 'renpy.hide_screen("mas_unisync_lock_not_held_warning")' not in header_source
 
     assert "if mas_unisync_lock_not_held:" in wrapped_save_source
     assert wrapped_save_source.index("if mas_unisync_lock_not_held:") < wrapped_save_source.index(
@@ -356,6 +359,73 @@ def test_lock_not_held_mode_blocks_save_upload_and_shows_quit_prompt():
     assert "if mas_unisync_lock_not_held:" in header_source
     assert "align (0.98, 0.04)" in header_source
     assert "[m_name]似乎不在这里呢..." in header_source
+    assert 'textbutton _("退出游戏")' in header_source
+    assert "Function(renpy.quit, relaunch=False)" in header_source
+
+
+def test_startup_network_failure_disables_unisync_for_session_and_shows_notice():
+    header_source = Path("game/Submods/MAS_UniSync/header.rpy").read_text(
+        encoding="utf-8"
+    )
+    hooks_source = Path("game/Submods/MAS_UniSync/hooks.rpy").read_text(
+        encoding="utf-8"
+    )
+    wrapped_save_source = hooks_source.split(
+        "def mas_unisync_wrapped_persistent_save():", 1
+    )[1].split(
+        "    def mas_unisync_install_save_hook():",
+        1,
+    )[0]
+    startup_failure_source = hooks_source.split(
+        "def mas_unisync_enter_startup_failure_mode(reason=None):", 1
+    )[1].split(
+        "    def mas_unisync_start_heartbeat():",
+        1,
+    )[0]
+    startup_sync_source = hooks_source.split(
+        "def mas_unisync_startup_sync(force=False, raise_on_failure=False, upload_after_sync=False, load_remote_into_memory=False):",
+        1,
+    )[1].split(
+        "    def mas_unisync_validate_persistent_for_upload",
+        1,
+    )[0]
+    upload_now_source = hooks_source.split(
+        "def mas_unisync_upload_now(raise_on_failure=False, force=False):", 1
+    )[1].split(
+        "    def mas_unisync_enqueue_upload():",
+        1,
+    )[0]
+    enqueue_source = hooks_source.split(
+        "def mas_unisync_enqueue_upload():", 1
+    )[1].split(
+        "    def mas_unisync_wrapped_persistent_save():",
+        1,
+    )[0]
+
+    assert "mas_unisync_startup_failed = False" in hooks_source
+    assert "def mas_unisync_enter_startup_failure_mode(reason=None):" in hooks_source
+    assert "mas_unisync_startup_failed = True" in startup_failure_source
+    assert 'mas_unisync_status["sync_status"] = "disabled"' in startup_failure_source
+    assert "return mas_unisync_enter_startup_failure_mode(exc)" in startup_sync_source
+    assert 'renpy.show_screen("mas_unisync_startup_failure_notice")' not in hooks_source
+    assert 'renpy.hide_screen("mas_unisync_startup_failure_notice")' not in hooks_source
+    assert 'renpy.show_screen("mas_unisync_startup_failure_notice")' not in header_source
+    assert 'renpy.hide_screen("mas_unisync_startup_failure_notice")' not in header_source
+    assert 'config.overlay_screens.append("mas_unisync_startup_failure_overlay")' in hooks_source
+
+    assert "if mas_unisync_startup_failed:" in upload_now_source
+    assert "if mas_unisync_startup_failed:" in enqueue_source
+    assert "if mas_unisync_startup_failed:" in wrapped_save_source
+    assert "return None" in wrapped_save_source.split(
+        "if mas_unisync_startup_failed:", 1
+    )[1].split(
+        "return mas_unisync_original_persistent_save()", 1
+    )[0]
+
+    assert "screen mas_unisync_startup_failure_notice():" in header_source
+    assert "if mas_unisync_startup_failed:" in header_source
+    assert "当前会话无法保存，因为连接至 UniSync 服务器失败" in header_source
+    assert "请清除 UniSync API key 以禁用 UniSync" in header_source
     assert 'textbutton _("退出游戏")' in header_source
     assert "Function(renpy.quit, relaunch=False)" in header_source
 
