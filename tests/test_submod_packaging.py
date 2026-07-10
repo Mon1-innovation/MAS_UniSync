@@ -170,6 +170,25 @@ def test_profile_key_setup_requests_immediate_upload_after_cloud_sync():
     assert "renpy.quit" in header_source
 
 
+def test_first_start_guest_flow_persists_marker_uploads_and_warns_daily():
+    header_source = Path("game/Submods/MAS_UniSync/header.rpy").read_text(
+        encoding="utf-8"
+    )
+    hooks_source = Path("game/Submods/MAS_UniSync/hooks.rpy").read_text(
+        encoding="utf-8"
+    )
+
+    assert "persistent._mas_unisync_guest_created" in hooks_source
+    assert "persistent._mas_unisync_guest_warning_date" in hooks_source
+    assert "mas_unisync_sync.provision_guest_profile(" in hooks_source
+    assert "mas_unisync_save_key(mas_unisync_core.PROFILE_KEY_FEATURE, profile_key)" in hooks_source
+    assert "mas_unisync_original_persistent_save()" in hooks_source
+    assert "mas_unisync_startup_sync(force=True, upload_after_sync=True, load_remote_into_memory=True)" in hooks_source
+    assert "screen mas_unisync_guest_warning():" in header_source
+    assert "长期未使用" in header_source
+    assert "云端存档" in header_source
+
+
 def test_settings_panel_does_not_expose_manual_upload_or_connection_test():
     header_source = Path("game/Submods/MAS_UniSync/header.rpy").read_text(
         encoding="utf-8"

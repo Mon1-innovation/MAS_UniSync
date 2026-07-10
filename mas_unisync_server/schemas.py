@@ -10,6 +10,10 @@ class LoginRequest(BaseModel):
     password: str
 
 
+class ProfileKeyRequest(BaseModel):
+    profile_key: str = Field(min_length=1)
+
+
 class ProfileCreateRequest(BaseModel):
     display_name: str | None = None
 
@@ -32,5 +36,6 @@ class SystemSettingsRequest(BaseModel):
     frontend_web_url: str = ""
     profile_storage_limit_bytes: int = Field(gt=0)
     max_active_profiles_per_account: int = Field(gt=0)
+    guest_key_retention_days: int | None = Field(default=None, gt=0)
     active_storage_bucket_id: int | None = None
     storage_buckets: list[StorageBucketRequest] | None = None

@@ -1,7 +1,9 @@
 from __future__ import annotations
 
 import asyncio
+from contextlib import asynccontextmanager, suppress
 from datetime import timedelta
+import secrets
 
 from fastapi import BackgroundTasks, Depends, FastAPI, File, Form, Header, HTTPException, Request, Response, UploadFile
 from fastapi.responses import StreamingResponse
@@ -9,7 +11,7 @@ from sqlalchemy import desc, func, inspect, or_, select, text
 from sqlalchemy.orm import Session
 from starlette.middleware.sessions import SessionMiddleware
 
-from .auth import admin_user, current_user, get_db
+from .auth import admin_user, current_user, get_db, regular_user
 from .database import Base, make_engine, make_sessionmaker
 from .flarum import FlarumClient
 from .models import AuditLog, Ban, Lock, PersistentDailyBackup, PersistentVersion, Profile, StorageBucket, User
@@ -21,8 +23,11 @@ from .services import (
     aware,
     backup_payload,
     cleanup_expired_locks,
+    cleanup_expired_guest_profiles,
     banned_exception,
+    ban_for_profile,
     active_profile_count_for_user,
+    anonymize_audit_actor,
     delete_storage_bucket,
     delete_profile_key as service_delete_profile_key,
     ensure_default_storage_bucket,
@@ -30,6 +35,7 @@ from .services import (
     get_profile_by_key,
     get_version_bytes,
     max_active_profiles_per_account,
+    guest_key_retention_days,
     profile_payload,
     profile_storage_limit_bytes,
     profile_storage_usage,
@@ -49,7 +55,7 @@ from .services import (
     user_storage_usage,
     version_payload,
 )
-from .schemas import BanRequest, LoginRequest, ProfileCreateRequest, StorageBucketRequest, SystemSettingsRequest
+from .schemas import BanRequest, LoginRequest, ProfileCreateRequest, ProfileKeyRequest, StorageBucketRequest, SystemSettingsRequest
 from .settings import Settings
 from .storage import LocalObjectStorage
 
@@ -62,6 +68,17 @@ def ensure_storage_schema(engine) -> None:
     if "bucket_id" not in columns:
         with engine.begin() as connection:
             connection.execute(text("ALTER TABLE persistent_versions ADD COLUMN bucket_id INTEGER"))
+
+
+def run_guest_maintenance(app: FastAPI) -> dict[str, int]:
+    with app.state.SessionLocal() as db:
+        return cleanup_expired_guest_profiles(db, app.state.settings, utc_now())
+
+
+async def guest_maintenance_loop(app: FastAPI) -> None:
+    while True:
+        await asyncio.sleep(24 * 60 * 60)
+        await asyncio.to_thread(run_guest_maintenance, app)
 
 
 def create_app(settings: Settings | None = None, flarum_client=None) -> FastAPI:
@@ -80,7 +97,19 @@ def create_app(settings: Settings | None = None, flarum_client=None) -> FastAPI:
 
     
 
-    app = FastAPI(title="MAS UniSync Server")
+    @asynccontextmanager
+    async def lifespan(app: FastAPI):
+        await asyncio.to_thread(run_guest_maintenance, app)
+        task = asyncio.create_task(guest_maintenance_loop(app))
+        app.state.guest_maintenance_task = task
+        try:
+            yield
+        finally:
+            task.cancel()
+            with suppress(asyncio.CancelledError):
+                await task
+
+    app = FastAPI(title="MAS UniSync Server", lifespan=lifespan)
     app.add_middleware(SessionMiddleware, secret_key=settings.session_secret, same_site="lax")
     app.state.settings = settings
     app.state.SessionLocal = SessionLocal
@@ -100,6 +129,27 @@ def create_app(settings: Settings | None = None, flarum_client=None) -> FastAPI:
         request.session["user_id"] = user.id
         return {"user": user_payload(user)}
 
+    @app.post("/login/guest")
+    def login_guest(payload: ProfileKeyRequest, request: Request, db: Session = Depends(get_db)):
+        now = request_now(request)
+        profile = db.scalar(
+            select(Profile).where(
+                Profile.profile_key_plaintext == payload.profile_key,
+                Profile.revoked_at.is_(None),
+            )
+        )
+        if profile is None:
+            raise HTTPException(status_code=401, detail={"code": "invalid_profile_key"})
+        if profile.user.role != "guest":
+            raise HTTPException(status_code=403, detail={"code": "profile_key_not_guest"})
+        ban = ban_for_profile(db, profile, now)
+        if ban:
+            raise banned_exception(ban)
+        profile.last_used_at = now
+        request.session["user_id"] = profile.user_id
+        db.commit()
+        return {"user": user_payload(profile.user)}
+
     @app.post("/logout", status_code=204)
     def logout(request: Request):
         request.session.clear()
@@ -116,6 +166,7 @@ def create_app(settings: Settings | None = None, flarum_client=None) -> FastAPI:
             profile,
             profile_storage_usage(db, profile.id),
             profile_storage_limit_bytes(db),
+            guest_key_retention_days(db),
         )
         payload["lock_status"] = "active" if now is not None and active_lock(db, profile.id, now) else "none"
         return payload
@@ -142,7 +193,7 @@ def create_app(settings: Settings | None = None, flarum_client=None) -> FastAPI:
     def create_profile_key(
         payload: ProfileCreateRequest,
         request: Request,
-        user: User = Depends(current_user),
+        user: User = Depends(regular_user),
         db: Session = Depends(get_db),
     ):
         active_count = active_profile_count_for_user(db, user.id)
@@ -169,11 +220,98 @@ def create_app(settings: Settings | None = None, flarum_client=None) -> FastAPI:
         db.commit()
         return profile_response_payload(db, profile, request_now(request))
 
+    @app.post("/v1/guest/profile-key", status_code=201)
+    def create_guest_profile_key(request: Request, db: Session = Depends(get_db)):
+        now = request_now(request)
+        identity = secrets.token_urlsafe(18)
+        user = User(
+            flarum_user_id="guest:" + identity,
+            username="guest-" + identity,
+            display_name="Guest",
+            role="guest",
+            flarum_groups_json="[]",
+            created_at=now,
+            updated_at=now,
+        )
+        db.add(user)
+        db.flush()
+        profile = Profile(
+            user_id=user.id,
+            profile_key_plaintext=generate_profile_key(),
+            display_name="Guest",
+            created_at=now,
+            updated_at=now,
+        )
+        db.add(profile)
+        db.flush()
+        audit(
+            db,
+            request,
+            None,
+            "guest.profile_key.create",
+            target_user_id=user.id,
+            target_profile_id=profile.id,
+            target_profile_key_id=profile.id,
+        )
+        db.commit()
+        return profile_response_payload(db, profile, now)
+
+    @app.post("/account/profile-keys/import-guest")
+    def import_guest_profile_key(
+        payload: ProfileKeyRequest,
+        request: Request,
+        user: User = Depends(regular_user),
+        db: Session = Depends(get_db),
+    ):
+        now = request_now(request)
+        profile = db.scalar(
+            select(Profile)
+            .where(
+                Profile.profile_key_plaintext == payload.profile_key,
+                Profile.revoked_at.is_(None),
+            )
+            .with_for_update()
+        )
+        if profile is None:
+            raise HTTPException(status_code=404, detail={"code": "invalid_profile_key"})
+        ban = ban_for_profile(db, profile, now)
+        if ban:
+            raise banned_exception(ban)
+        guest_owner = profile.user
+        if guest_owner.role != "guest":
+            created_as_guest = db.scalar(
+                select(AuditLog.id).where(
+                    AuditLog.action == "guest.profile_key.create",
+                    AuditLog.target_profile_id == profile.id,
+                )
+            )
+            code = "guest_profile_already_claimed" if created_as_guest else "profile_key_not_guest"
+            raise HTTPException(status_code=409, detail={"code": code})
+        if active_profile_count_for_user(db, user.id) >= max_active_profiles_per_account(db):
+            raise HTTPException(status_code=409, detail={"code": "active_profile_limit_exceeded"})
+        profile.user = user
+        profile.user_id = user.id
+        profile.updated_at = now
+        db.flush()
+        audit(
+            db,
+            request,
+            user,
+            "guest.profile_key.import",
+            target_user_id=user.id,
+            target_profile_id=profile.id,
+            target_profile_key_id=profile.id,
+        )
+        anonymize_audit_actor(db, guest_owner.id)
+        db.delete(guest_owner)
+        db.commit()
+        return profile_response_payload(db, profile, now)
+
     @app.post("/account/profile-keys/{profile_id}/refresh")
     def refresh_profile_key(
         profile_id: int,
         request: Request,
-        user: User = Depends(current_user),
+        user: User = Depends(regular_user),
         db: Session = Depends(get_db),
     ):
         profile = db.get(Profile, profile_id)
@@ -197,7 +335,7 @@ def create_app(settings: Settings | None = None, flarum_client=None) -> FastAPI:
     def delete_account_profile_key(
         profile_id: int,
         request: Request,
-        user: User = Depends(current_user),
+        user: User = Depends(regular_user),
         db: Session = Depends(get_db),
     ):
         profile = db.get(Profile, profile_id)
@@ -474,7 +612,7 @@ def create_app(settings: Settings | None = None, flarum_client=None) -> FastAPI:
     @app.get("/admin/users")
     def admin_users(request: Request, _: User = Depends(admin_user), db: Session = Depends(get_db)):
         now = request_now(request)
-        users = list(db.scalars(select(User).order_by(User.id)))
+        users = list(db.scalars(select(User).where(User.role != "guest").order_by(User.id)))
         return {"items": [user_list_item(db, user, now) for user in users]}
 
     @app.get("/admin/settings")

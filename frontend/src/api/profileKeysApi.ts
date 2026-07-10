@@ -16,6 +16,13 @@ export function createProfileKey(displayName: string | null) {
   })
 }
 
+export function importGuestProfileKey(profileKey: string) {
+  return request<Profile>('/account/profile-keys/import-guest', {
+    method: 'POST',
+    body: {profile_key: profileKey},
+  })
+}
+
 export function refreshProfileKey(profileId: number) {
   return request<Profile>(`/account/profile-keys/${profileId}/refresh`, {method: 'POST'})
 }

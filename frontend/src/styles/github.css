@@ -339,6 +339,57 @@ input:focus-visible {
   margin-bottom: 12px;
 }
 
+.login-mode {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  margin-bottom: 16px;
+  padding: 3px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--surface-soft);
+}
+
+.login-mode button {
+  min-height: 34px;
+  padding: 6px 10px;
+  color: var(--muted);
+  font: inherit;
+  font-size: 13px;
+  font-weight: 600;
+  background: transparent;
+  border: 0;
+  border-radius: 4px;
+  cursor: pointer;
+}
+
+.login-mode button.is-active {
+  color: var(--text);
+  background: var(--surface);
+  box-shadow: var(--shadow-sm);
+}
+
+.profile-heading-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.guest-retention-notice {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  padding: 12px 14px;
+  color: #674d00;
+  background: #fff8c5;
+  border: 1px solid #d4a72c;
+  border-radius: 6px;
+}
+
+.guest-retention-notice p {
+  margin: 0;
+}
+
 .stack {
   display: grid;
   gap: 14px;

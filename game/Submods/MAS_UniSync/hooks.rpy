@@ -1,6 +1,7 @@
 init -968 python:
     import mas_unisync_http
     import mas_unisync_sync
+    import datetime
     import os
     import sys
     import threading
@@ -114,6 +115,43 @@ init -968 python:
         mas_unisync_heartbeat_thread.daemon = True
         mas_unisync_heartbeat_thread.start()
 
+    def mas_unisync_persist_guest_created():
+        persistent._mas_unisync_guest_created = True
+        mas_unisync_original_persistent_save()
+
+    def mas_unisync_start_initial_guest_sync():
+        return mas_unisync_startup_sync(force=True, upload_after_sync=True, load_remote_into_memory=True)
+
+    def mas_unisync_log_guest_provision_error(exc):
+        mas_unisync_core.submod_log_debug(
+            "MAS UniSync guest profile creation failed: {0}".format(exc)
+        )
+
+    def mas_unisync_try_provision_guest():
+        return mas_unisync_sync.provision_guest_profile(
+            mas_unisync_get_host(),
+            mas_unisync_get_profile_key(),
+            bool(getattr(persistent, "_mas_unisync_guest_created", False)),
+            lambda profile_key: mas_unisync_save_key(mas_unisync_core.PROFILE_KEY_FEATURE, profile_key),
+            mas_unisync_persist_guest_created,
+            mas_unisync_start_initial_guest_sync,
+            on_error=mas_unisync_log_guest_provision_error
+        )
+
+    def mas_unisync_show_guest_warning_if_needed(resolved_profile):
+        today = datetime.date.today().isoformat()
+        last_warning_date = getattr(persistent, "_mas_unisync_guest_warning_date", "")
+        if not mas_unisync_sync.should_show_guest_warning(
+            resolved_profile,
+            last_warning_date,
+            today
+        ):
+            return False
+        persistent._mas_unisync_guest_warning_date = today
+        mas_unisync_original_persistent_save()
+        renpy.show_screen("mas_unisync_guest_warning")
+        return True
+
     def mas_unisync_startup_sync(force=False, raise_on_failure=False, upload_after_sync=False, load_remote_into_memory=False):
         global mas_unisync_session, mas_unisync_lock_not_held, mas_unisync_startup_failed
         profile_key = mas_unisync_get_profile_key()
@@ -129,6 +167,7 @@ init -968 python:
         mas_unisync_session = mas_unisync_make_session()
         try:
             mas_unisync_session.start(upload_after_sync=upload_after_sync, load_remote_into_memory=load_remote_into_memory)
+            mas_unisync_show_guest_warning_if_needed(mas_unisync_session.resolved_profile)
             mas_unisync_lock_not_held = False
             mas_unisync_startup_failed = False
             mas_unisync_update_status(mas_unisync_session.status)
@@ -318,6 +357,7 @@ init -968 python:
     mas_unisync_cleanup_for_renpy6()
     mas_unisync_install_save_hook()
     mas_unisync_install_lock_not_held_overlay()
+    mas_unisync_try_provision_guest()
 
     if mas_unisync_session is None and not mas_unisync_lock_not_held:
         _api_url = mas_unisync_get_host()

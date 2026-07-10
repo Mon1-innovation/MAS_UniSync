@@ -157,6 +157,120 @@ def test_fetch_profile_keys_url_requests_public_config_from_api_url():
     assert timeouts == [10]
 
 
+def test_guest_provisioning_saves_key_marks_persistent_and_starts_initial_sync():
+    sync = load_client_module("mas_unisync_sync")
+    requests = []
+    events = []
+
+    def fake_urlopen(request, timeout):
+        requests.append(request)
+        return FakeResponse(
+            201,
+            {
+                "profile_key": "maspk_guest",
+                "is_guest": True,
+                "guest_retention_days": 360,
+            },
+        )
+
+    result = sync.provision_guest_profile(
+        "https://api.example.test/root/",
+        "",
+        False,
+        lambda key: events.append(("save_key", key)),
+        lambda: events.append(("mark_created", True)),
+        lambda: events.append(("initial_sync", True)),
+        urlopen=fake_urlopen,
+    )
+
+    assert result["profile_key"] == "maspk_guest"
+    assert requests[0].full_url == "https://api.example.test/root/v1/guest/profile-key"
+    assert requests[0].get_method() == "POST"
+    assert events == [
+        ("save_key", "maspk_guest"),
+        ("mark_created", True),
+        ("initial_sync", True),
+    ]
+
+
+def test_guest_provisioning_failure_does_not_mark_and_retries_next_call():
+    sync = load_client_module("mas_unisync_sync")
+    events = []
+    attempts = []
+
+    def flaky_urlopen(request, timeout):
+        attempts.append(request)
+        if len(attempts) == 1:
+            raise OSError("offline")
+        return FakeResponse(201, {"profile_key": "maspk_retry", "is_guest": True})
+
+    callbacks = (
+        lambda key: events.append(("save_key", key)),
+        lambda: events.append(("mark_created", True)),
+        lambda: events.append(("initial_sync", True)),
+    )
+    first = sync.provision_guest_profile(
+        "https://api.example.test",
+        "",
+        False,
+        callbacks[0],
+        callbacks[1],
+        callbacks[2],
+        urlopen=flaky_urlopen,
+    )
+    second = sync.provision_guest_profile(
+        "https://api.example.test",
+        "",
+        False,
+        callbacks[0],
+        callbacks[1],
+        callbacks[2],
+        urlopen=flaky_urlopen,
+    )
+
+    assert first is None
+    assert second["profile_key"] == "maspk_retry"
+    assert len(attempts) == 2
+    assert events == [
+        ("save_key", "maspk_retry"),
+        ("mark_created", True),
+        ("initial_sync", True),
+    ]
+
+
+@pytest.mark.parametrize(
+    ("current_key", "guest_created"),
+    [("maspk_existing", False), ("", True)],
+)
+def test_guest_provisioning_skips_when_key_or_creation_marker_exists(current_key, guest_created):
+    sync = load_client_module("mas_unisync_sync")
+
+    def unexpected_urlopen(request, timeout):
+        raise AssertionError("guest creation must not be requested")
+
+    result = sync.provision_guest_profile(
+        "https://api.example.test",
+        current_key,
+        guest_created,
+        lambda key: None,
+        lambda: None,
+        lambda: None,
+        urlopen=unexpected_urlopen,
+    )
+
+    assert result is None
+
+
+def test_guest_warning_is_shown_only_once_per_natural_day_while_profile_is_guest():
+    sync = load_client_module("mas_unisync_sync")
+    guest_profile = {"profile": {"is_guest": True}}
+    bound_profile = {"profile": {"is_guest": False}}
+
+    assert sync.should_show_guest_warning(guest_profile, "2026-01-01", "2026-01-02") is True
+    assert sync.should_show_guest_warning(guest_profile, "2026-01-02", "2026-01-02") is False
+    assert sync.should_show_guest_warning(bound_profile, "2026-01-01", "2026-01-02") is False
+
+
 def test_sync_session_requests_use_ten_second_timeout(tmp_path):
     sync = load_client_module("mas_unisync_sync")
     persistent = tmp_path / "persistent"

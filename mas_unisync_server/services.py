@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import logging
 import secrets
 import base64
 from datetime import date, datetime, timedelta, timezone
@@ -11,7 +12,7 @@ from pathlib import Path
 import httpx
 from cryptography.fernet import Fernet, InvalidToken
 from fastapi import HTTPException, Request
-from sqlalchemy import delete, desc, func, or_, select
+from sqlalchemy import delete, desc, func, or_, select, update
 from sqlalchemy.orm import Session
 
 from .models import (
@@ -63,13 +64,16 @@ def generate_profile_key() -> str:
 
 DEFAULT_PROFILE_STORAGE_LIMIT_BYTES = 10 * 1024 * 1024
 DEFAULT_MAX_ACTIVE_PROFILES_PER_ACCOUNT = 3
+DEFAULT_GUEST_KEY_RETENTION_DAYS = 360
 SETTING_BACKEND_API_URL = "backend_api_url"
 SETTING_FRONTEND_WEB_URL = "frontend_web_url"
 SETTING_PROFILE_STORAGE_LIMIT_BYTES = "profile_storage_limit_bytes"
 SETTING_MAX_ACTIVE_PROFILES_PER_ACCOUNT = "max_active_profiles_per_account"
+SETTING_GUEST_KEY_RETENTION_DAYS = "guest_key_retention_days"
 SUPPORTED_STORAGE_BUCKET_TYPES = {"local", "webdav"}
 DEFAULT_LOCAL_BUCKET_NAME = "Docker local storage"
 ENCRYPTED_STORAGE_PASSWORD_PREFIX = "fernet:"
+logger = logging.getLogger(__name__)
 
 
 def storage_secret_fernet(settings: Settings) -> Fernet:
@@ -115,7 +119,16 @@ def user_payload(user: User) -> dict:
     }
 
 
-def profile_payload(profile: Profile, storage_usage: int = 0, storage_limit: int = DEFAULT_PROFILE_STORAGE_LIMIT_BYTES) -> dict:
+def profile_payload(
+    profile: Profile,
+    storage_usage: int = 0,
+    storage_limit: int = DEFAULT_PROFILE_STORAGE_LIMIT_BYTES,
+    guest_retention_days: int = DEFAULT_GUEST_KEY_RETENTION_DAYS,
+) -> dict:
+    is_guest = profile.user.role == "guest"
+    guest_expires_at = None
+    if is_guest:
+        guest_expires_at = aware(profile.last_used_at or profile.created_at) + timedelta(days=guest_retention_days)
     return {
         "id": profile.id,
         "user_id": profile.user_id,
@@ -127,6 +140,9 @@ def profile_payload(profile: Profile, storage_usage: int = 0, storage_limit: int
         "last_used_at": iso(profile.last_used_at),
         "last_upload_at": iso(profile.last_upload_at),
         "created_at": iso(profile.created_at),
+        "is_guest": is_guest,
+        "guest_retention_days": guest_retention_days if is_guest else None,
+        "guest_expires_at": iso(guest_expires_at),
     }
 
 
@@ -234,6 +250,14 @@ def audit(
             user_agent=request.headers.get("User-Agent"),
             created_at=request_now(request),
         )
+    )
+
+
+def anonymize_audit_actor(db: Session, user_id: int) -> None:
+    db.execute(
+        update(AuditLog)
+        .where(AuditLog.actor_user_id == user_id)
+        .values(actor_user_id=None)
     )
 
 
@@ -572,6 +596,17 @@ def max_active_profiles_per_account(db: Session) -> int:
     return value if value > 0 else DEFAULT_MAX_ACTIVE_PROFILES_PER_ACCOUNT
 
 
+def guest_key_retention_days(db: Session) -> int:
+    raw = read_system_setting(db, SETTING_GUEST_KEY_RETENTION_DAYS)
+    if raw is None or raw == "":
+        return DEFAULT_GUEST_KEY_RETENTION_DAYS
+    try:
+        value = int(raw)
+    except ValueError:
+        return DEFAULT_GUEST_KEY_RETENTION_DAYS
+    return value if value > 0 else DEFAULT_GUEST_KEY_RETENTION_DAYS
+
+
 def system_settings_payload(db: Session, request: Request) -> dict:
     origin = request_origin(request)
     backend_api_url = normalize_url_setting(read_system_setting(db, SETTING_BACKEND_API_URL))
@@ -583,6 +618,7 @@ def system_settings_payload(db: Session, request: Request) -> dict:
         "frontend_web_url": frontend_web_url or origin,
         "profile_storage_limit_bytes": profile_storage_limit_bytes(db),
         "max_active_profiles_per_account": max_active_profiles_per_account(db),
+        "guest_key_retention_days": guest_key_retention_days(db),
         "active_storage_bucket_id": active_bucket.id if active_bucket else None,
         "storage_buckets": [storage_bucket_payload(bucket, request.app.state.settings, db) for bucket in buckets],
     }
@@ -594,6 +630,8 @@ def save_system_settings(db: Session, request: Request, payload) -> dict:
     write_system_setting(db, SETTING_FRONTEND_WEB_URL, normalize_url_setting(payload.frontend_web_url), now)
     write_system_setting(db, SETTING_PROFILE_STORAGE_LIMIT_BYTES, str(payload.profile_storage_limit_bytes), now)
     write_system_setting(db, SETTING_MAX_ACTIVE_PROFILES_PER_ACCOUNT, str(payload.max_active_profiles_per_account), now)
+    if payload.guest_key_retention_days is not None:
+        write_system_setting(db, SETTING_GUEST_KEY_RETENTION_DAYS, str(payload.guest_key_retention_days), now)
     ensure_default_storage_bucket(db, request.app.state.settings)
     requested_active_id = payload.active_storage_bucket_id
     if payload.storage_buckets is not None:
@@ -795,6 +833,82 @@ def cleanup_expired_locks(db: Session, now: datetime) -> int:
     result = db.execute(delete(Lock).where(Lock.expires_at <= now))
     db.commit()
     return result.rowcount
+
+
+def cleanup_expired_guest_profiles(db: Session, settings: Settings, now: datetime) -> dict[str, int]:
+    cutoff = now - timedelta(days=guest_key_retention_days(db))
+    profiles = list(
+        db.scalars(
+            select(Profile)
+            .join(User, User.id == Profile.user_id)
+            .where(
+                User.role == "guest",
+                func.coalesce(Profile.last_used_at, Profile.created_at) < cutoff,
+            )
+            .order_by(Profile.id)
+        )
+    )
+    result = {"deleted": 0, "storage_failures": 0}
+    for profile in profiles:
+        owner = profile.user
+        versions = list(
+            db.scalars(select(PersistentVersion).where(PersistentVersion.profile_id == profile.id))
+        )
+        try:
+            for version in versions:
+                delete_version_object(db, settings, version.bucket_id, version.object_path)
+        except Exception:
+            logger.exception("Failed to delete stored objects for expired guest profile %s", profile.id)
+            db.add(
+                AuditLog(
+                    actor_user_id=None,
+                    actor_role="system",
+                    action="system.guest_profile.cleanup_storage_failed",
+                    target_user_id=owner.id,
+                    target_profile_id=profile.id,
+                    target_profile_key_id=profile.id,
+                    created_at=now,
+                )
+            )
+            db.commit()
+            result["storage_failures"] += 1
+            continue
+
+        owner_id = owner.id
+        profile_id = profile.id
+        db.add(
+            AuditLog(
+                actor_user_id=None,
+                actor_role="system",
+                action="system.guest_profile.cleanup",
+                target_user_id=owner_id,
+                target_profile_id=profile_id,
+                target_profile_key_id=profile_id,
+                created_at=now,
+            )
+        )
+        db.execute(delete(Lock).where(Lock.profile_id == profile_id))
+        db.execute(delete(PersistentCurrent).where(PersistentCurrent.profile_id == profile_id))
+        db.execute(delete(PersistentDailyBackup).where(PersistentDailyBackup.profile_id == profile_id))
+        db.execute(delete(PersistentVersion).where(PersistentVersion.profile_id == profile_id))
+        db.execute(
+            delete(Ban).where(
+                Ban.target_type.in_(("profile", "key")),
+                Ban.target_id == profile_id,
+            )
+        )
+        db.delete(profile)
+        db.flush()
+        remaining_profiles = db.scalar(
+            select(func.count(Profile.id)).where(Profile.user_id == owner_id)
+        ) or 0
+        if remaining_profiles == 0:
+            db.execute(delete(Ban).where(Ban.target_type == "user", Ban.target_id == owner_id))
+            anonymize_audit_actor(db, owner_id)
+            db.delete(owner)
+        db.commit()
+        result["deleted"] += 1
+    return result
 
 def require_lock(db: Session, profile_id: int, lease_token: str | None, now: datetime) -> Lock:
     if not lease_token:

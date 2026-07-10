@@ -25,6 +25,7 @@ class SyncSession(object):
         self.urlopen = urlopen
         self.status = core.SyncStatus()
         self.status.enabled = bool(profile_key)
+        self.resolved_profile = None
 
     def headers(self, include_lease=False, extra=None):
         headers = {"X-MAS-Profile-Key": self.profile_key}
@@ -78,7 +79,8 @@ class SyncSession(object):
             raise
 
     def resolve_profile(self):
-        return self.request_json("GET", "/v1/profile/resolve", headers=self.headers())
+        self.resolved_profile = self.request_json("GET", "/v1/profile/resolve", headers=self.headers())
+        return self.resolved_profile
 
     def acquire_lock(self):
         try:
@@ -184,3 +186,47 @@ def fetch_profile_keys_url(api_url, urlopen=None):
         if profile_keys_url:
             return profile_keys_url
     raise core.UniSyncError("web-url config response did not include profile_keys_url")
+
+
+def create_guest_profile_key(api_url, urlopen=None):
+    payload = http.request_json(
+        "POST",
+        core.build_url(core.api_base_url(api_url), "/v1/guest/profile-key"),
+        data=b"",
+        urlopen=urlopen,
+    )
+    profile_key = payload.get("profile_key") if isinstance(payload, dict) else None
+    if not profile_key:
+        raise core.UniSyncError("guest profile response did not include profile_key")
+    return payload
+
+
+def provision_guest_profile(
+    api_url,
+    current_profile_key,
+    guest_created,
+    save_profile_key,
+    mark_guest_created,
+    start_initial_sync,
+    urlopen=None,
+    on_error=None,
+):
+    if current_profile_key or guest_created:
+        return None
+    try:
+        payload = create_guest_profile_key(api_url, urlopen=urlopen)
+    except Exception as exc:
+        if on_error is not None:
+            on_error(exc)
+        return None
+    save_profile_key(payload["profile_key"])
+    mark_guest_created()
+    start_initial_sync()
+    return payload
+
+
+def should_show_guest_warning(resolved_profile, last_warning_date, today_date):
+    if not isinstance(resolved_profile, dict):
+        return False
+    profile = resolved_profile.get("profile", resolved_profile)
+    return bool(isinstance(profile, dict) and profile.get("is_guest") and last_warning_date != today_date)

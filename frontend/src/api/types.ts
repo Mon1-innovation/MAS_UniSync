@@ -1,8 +1,8 @@
-export type UserRole = 'admin' | 'user'
+export type UserRole = 'admin' | 'user' | 'guest'
 
 export interface User {
   id: number
-  flarum_user_id: number
+  flarum_user_id: number | string
   username: string
   display_name: string | null
   avatar_url: string | null
@@ -31,6 +31,9 @@ export interface Profile {
   last_used_at: string | null
   last_upload_at: string | null
   created_at: string
+  is_guest: boolean
+  guest_retention_days: number | null
+  guest_expires_at: string | null
 }
 
 export interface Version {
@@ -94,6 +97,7 @@ export interface SystemSettings {
   frontend_web_url: string
   profile_storage_limit_bytes: number
   max_active_profiles_per_account: number
+  guest_key_retention_days: number
   active_storage_bucket_id: number | null
   storage_buckets: StorageBucket[]
 }

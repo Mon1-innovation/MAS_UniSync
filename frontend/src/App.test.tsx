@@ -25,6 +25,15 @@ const normalUser: User = {
   role: 'user',
 }
 
+const guestUser: User = {
+  ...normalUser,
+  id: 3,
+  flarum_user_id: 'guest:3',
+  username: 'guest-3',
+  display_name: 'Guest',
+  role: 'guest',
+}
+
 function mockFetch(handler: (input: RequestInfo | URL, init?: RequestInit) => Response | Promise<Response>) {
   globalThis.fetch = vi.fn((input: RequestInfo | URL, init?: RequestInit) => Promise.resolve(handler(input, init)))
 }
@@ -137,6 +146,129 @@ describe('App', () => {
     await userEvent.click(screen.getByRole('button', {name: /登录/i}))
 
     await expect(screen.findByText(/flarum 凭据无效/i)).resolves.toBeInTheDocument()
+  })
+
+  it('logs in with a guest key and hides profile mutation controls', async () => {
+    let submittedBody: unknown
+    const guestProfile = {
+      id: 30,
+      user_id: 3,
+      display_name: 'Guest',
+      profile_key: 'maspk_guest',
+      storage_usage: 0,
+      storage_limit: 10485760,
+      lock_status: 'none',
+      revoked_at: null,
+      last_used_at: '2026-07-10T08:00:00Z',
+      last_upload_at: null,
+      created_at: '2026-07-10T08:00:00Z',
+      is_guest: true,
+      guest_retention_days: 360,
+      guest_expires_at: '2027-07-05T08:00:00Z',
+    }
+    mockFetch((input, init) => {
+      if (input === '/login/guest' && init?.method === 'POST') {
+        submittedBody = JSON.parse(String(init.body))
+        return json({user: guestUser})
+      }
+      if (input === '/account/profile-keys') {
+        return json({items: [guestProfile]})
+      }
+      return json({detail: {code: 'not_found'}}, {status: 404})
+    })
+
+    render(
+      <MemoryRouter initialEntries={['/login']}>
+        <App />
+      </MemoryRouter>,
+    )
+
+    await userEvent.click(screen.getByRole('button', {name: /游客 Key/i}))
+    await userEvent.type(screen.getByLabelText(/^Profile Key$/i), 'maspk_guest')
+    await userEvent.click(screen.getByRole('button', {name: /使用游客 Key 登录/i}))
+
+    await expect(screen.findByText(/长期未使用.*删除.*云端存档/i)).resolves.toBeInTheDocument()
+    expect(submittedBody).toEqual({profile_key: 'maspk_guest'})
+    expect(screen.queryByRole('button', {name: /新建 Profile Key/i})).not.toBeInTheDocument()
+    expect(screen.queryByRole('button', {name: /导入游客 Key/i})).not.toBeInTheDocument()
+    expect(screen.queryByRole('button', {name: /刷新.*Key/i})).not.toBeInTheDocument()
+    expect(screen.queryByRole('button', {name: /删除.*Key/i})).not.toBeInTheDocument()
+    expect(screen.getByRole('button', {name: /查看文件/i})).toBeInTheDocument()
+  })
+
+  it('imports a guest key into a Flarum account', async () => {
+    localStorage.setItem('mas_unisync_user', JSON.stringify(normalUser))
+    let submittedBody: unknown
+    mockFetch((input, init) => {
+      if (input === '/account/profile-keys' && !init?.method) {
+        return json({items: []})
+      }
+      if (input === '/account/profile-keys/import-guest' && init?.method === 'POST') {
+        submittedBody = JSON.parse(String(init.body))
+        return json({
+          id: 31,
+          user_id: 2,
+          display_name: 'Guest',
+          profile_key: 'maspk_imported',
+          storage_usage: 128,
+          storage_limit: 10485760,
+          lock_status: 'active',
+          revoked_at: null,
+          last_used_at: '2026-07-10T08:00:00Z',
+          last_upload_at: '2026-07-10T08:00:00Z',
+          created_at: '2026-07-09T08:00:00Z',
+          is_guest: false,
+          guest_retention_days: null,
+          guest_expires_at: null,
+        })
+      }
+      return json({detail: {code: 'not_found'}}, {status: 404})
+    })
+
+    render(
+      <MemoryRouter initialEntries={['/account/profile-keys']}>
+        <App />
+      </MemoryRouter>,
+    )
+
+    await userEvent.click(await screen.findByRole('button', {name: /导入游客 Key/i}))
+    await userEvent.type(screen.getByLabelText(/^游客 Profile Key$/i), 'maspk_imported')
+    await userEvent.click(screen.getByRole('button', {name: /^导入$/i}))
+
+    await expect(screen.findByText('maspk_imported')).resolves.toBeInTheDocument()
+    expect(submittedBody).toEqual({profile_key: 'maspk_imported'})
+  })
+
+  it.each([
+    ['invalid_profile_key', '游客 Key 无效'],
+    ['profile_key_not_guest', '不是游客 Key'],
+    ['guest_profile_already_claimed', '已经被认领'],
+    ['banned', '已被封禁'],
+    ['active_profile_limit_exceeded', '数量上限'],
+  ])('shows a specific guest import error for %s', async (code, message) => {
+    localStorage.setItem('mas_unisync_user', JSON.stringify(normalUser))
+    mockFetch((input, init) => {
+      if (input === '/account/profile-keys' && !init?.method) {
+        return json({items: []})
+      }
+      if (input === '/account/profile-keys/import-guest' && init?.method === 'POST') {
+        return json({detail: {code}}, {status: code === 'banned' ? 403 : 409})
+      }
+      return json({detail: {code: 'not_found'}}, {status: 404})
+    })
+
+    render(
+      <MemoryRouter initialEntries={['/account/profile-keys']}>
+        <App />
+      </MemoryRouter>,
+    )
+
+    await userEvent.click(await screen.findByRole('button', {name: /导入游客 Key/i}))
+    await userEvent.type(screen.getByLabelText(/^游客 Profile Key$/i), 'maspk_guest')
+    await userEvent.click(screen.getByRole('button', {name: /^导入$/i}))
+
+    const dialog = screen.getByRole('dialog')
+    await expect(within(dialog).findByText(new RegExp(message, 'i'))).resolves.toBeInTheDocument()
   })
 
   it('hides admin navigation for non-admin users', async () => {
@@ -1059,6 +1191,7 @@ describe('App', () => {
             frontend_web_url: 'https://portal.example.test',
             profile_storage_limit_bytes: 10485760,
             max_active_profiles_per_account: 3,
+            guest_key_retention_days: 360,
             active_storage_bucket_id: 1,
             storage_buckets: [defaultBucket],
           },
@@ -1072,6 +1205,7 @@ describe('App', () => {
             frontend_web_url: 'https://portal.example.test',
             profile_storage_limit_bytes: 20971520,
             max_active_profiles_per_account: 4,
+            guest_key_retention_days: 45,
             active_storage_bucket_id: 1,
             storage_buckets: [defaultBucket],
           },
@@ -1087,12 +1221,15 @@ describe('App', () => {
     )
 
     await expect(screen.findByRole('heading', {level: 1, name: /(settings|设置)/i})).resolves.toBeInTheDocument()
-    await userEvent.clear(screen.getByLabelText(/backend api url/i))
-    await userEvent.type(screen.getByLabelText(/backend api url/i), 'https://api2.example.test')
+    const backendApiUrl = await screen.findByLabelText(/backend api url/i)
+    await userEvent.clear(backendApiUrl)
+    await userEvent.type(backendApiUrl, 'https://api2.example.test')
     await userEvent.clear(screen.getByLabelText(/(profile storage limit|Profile 存储上限)/i))
     await userEvent.type(screen.getByLabelText(/(profile storage limit|Profile 存储上限)/i), '20971520')
     await userEvent.clear(screen.getByLabelText(/(max active profiles|最大启用 Profile 数)/i))
     await userEvent.type(screen.getByLabelText(/(max active profiles|最大启用 Profile 数)/i), '4')
+    await userEvent.clear(screen.getByLabelText(/(guest key retention|游客 Key 保留天数)/i))
+    await userEvent.type(screen.getByLabelText(/(guest key retention|游客 Key 保留天数)/i), '45')
     await userEvent.click(screen.getByRole('button', {name: /(save settings|保存设置)/i}))
 
     await expect(screen.findByText(/(settings saved|设置已保存)/i)).resolves.toBeInTheDocument()
@@ -1101,6 +1238,7 @@ describe('App', () => {
       frontend_web_url: 'https://portal.example.test',
       profile_storage_limit_bytes: 20971520,
       max_active_profiles_per_account: 4,
+      guest_key_retention_days: 45,
       active_storage_bucket_id: 1,
       storage_buckets: [{...defaultBucket, space_budget_bytes: null}],
     })

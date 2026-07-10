@@ -26,8 +26,13 @@ def current_user(request: Request, db: Session = Depends(get_db)) -> User:
     return user
 
 
+def regular_user(user: User = Depends(current_user)) -> User:
+    if user.role == "guest":
+        raise HTTPException(status_code=403, detail={"code": "guest_account_read_only"})
+    return user
+
+
 def admin_user(user: User = Depends(current_user)) -> User:
     if user.role != "admin":
         raise HTTPException(status_code=403, detail={"code": "admin_required"})
     return user
-

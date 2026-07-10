@@ -446,6 +446,26 @@ screen mas_unisync_startup_failure_overlay():
     if mas_unisync_startup_failed:
         use mas_unisync_startup_failure_notice
 
+screen mas_unisync_guest_warning():
+    zorder 219
+    modal True
+    frame:
+        align (0.5, 0.5)
+        xmaximum 600
+        padding (18, 16)
+        vbox:
+            spacing 10
+            text _("当前正在使用游客 Profile Key"):
+                style "main_menu_version"
+            text _("游客 Key 长期未使用会被自动回收，并同时删除全部云端存档。请在中心网站登录正式 Flarum 账号并导入此游客 Key，以长期保留同步档案。"):
+                style "main_menu_version"
+                size 16
+                xalign 0.0
+                text_align 0.0
+            textbutton _("知道了"):
+                style "mas_button_simple"
+                action Hide("mas_unisync_guest_warning")
+
 screen mas_unisync_settingpane():
     python:
         _status = mas_unisync_status if isinstance(mas_unisync_status, dict) else {}

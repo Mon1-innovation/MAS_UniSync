@@ -4,7 +4,8 @@ import {useEffect, useMemo, useState} from 'react'
 import {useTranslation} from 'react-i18next'
 import {useNavigate} from 'react-router-dom'
 import {ApiError} from '../api/client'
-import {createProfileKey, deleteProfileKey, getPublicWebConfig, listProfileKeys, refreshProfileKey} from '../api/profileKeysApi'
+import {createProfileKey, deleteProfileKey, getPublicWebConfig, importGuestProfileKey, listProfileKeys, refreshProfileKey} from '../api/profileKeysApi'
+import {useAuth} from '../auth/AuthProvider'
 import type {Profile} from '../api/types'
 import {ConfirmDialog} from '../components/ConfirmDialog'
 import {CopyableSecret} from '../components/CopyableSecret'
@@ -19,7 +20,9 @@ type PendingAction = {type: 'refresh' | 'delete'; profile: Profile} | null
 
 export function ProfileKeysPage() {
   const {t} = useTranslation()
+  const {user} = useAuth()
   const navigate = useNavigate()
+  const isGuest = user?.role === 'guest'
   const [profiles, setProfiles] = useState<Profile[]>([])
   const [isLoading, setIsLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
@@ -29,6 +32,9 @@ export function ProfileKeysPage() {
   const [pendingAction, setPendingAction] = useState<PendingAction>(null)
   const [isBackendHelpVisible, setIsBackendHelpVisible] = useState(false)
   const [isBusy, setIsBusy] = useState(false)
+  const [isImportOpen, setIsImportOpen] = useState(false)
+  const [importKey, setImportKey] = useState('')
+  const [importError, setImportError] = useState<string | null>(null)
 
   useEffect(() => {
     let cancelled = false
@@ -116,6 +122,33 @@ export function ProfileKeysPage() {
     }
   }
 
+  async function handleImport(event: React.FormEvent<HTMLFormElement>) {
+    event.preventDefault()
+    setIsBusy(true)
+    setImportError(null)
+    try {
+      const profile = await importGuestProfileKey(importKey.trim())
+      setProfiles((current) => [...current, profile])
+      setImportKey('')
+      setIsImportOpen(false)
+    } catch (caught) {
+      if (caught instanceof ApiError) {
+        const messages: Record<string, string> = {
+          invalid_profile_key: t('account.profileKeys.importInvalidError'),
+          profile_key_not_guest: t('account.profileKeys.importNotGuestError'),
+          guest_profile_already_claimed: t('account.profileKeys.importClaimedError'),
+          banned: t('account.profileKeys.importBannedError'),
+          active_profile_limit_exceeded: t('account.profileKeys.limitError'),
+        }
+        setImportError((caught.code && messages[caught.code]) || t('account.profileKeys.importError'))
+      } else {
+        setImportError(t('account.profileKeys.importError'))
+      }
+    } finally {
+      setIsBusy(false)
+    }
+  }
+
   return (
     <Box className="page-stack">
       <Box className="page-heading">
@@ -123,12 +156,25 @@ export function ProfileKeysPage() {
           <Text as="h1">{t('account.profileKeys.title')}</Text>
           <Text as="p">{t('account.profileKeys.description')}</Text>
         </Box>
-        <Button type="button" variant="primary" leadingVisual={PlusIcon} onClick={() => setIsCreateOpen(true)}>
-          {t('account.profileKeys.newKey')}
-        </Button>
+        {!isGuest ? (
+          <Box className="profile-heading-actions">
+            <Button type="button" leadingVisual={KeyIcon} onClick={() => { setImportError(null); setIsImportOpen(true) }}>
+              {t('account.profileKeys.importGuest')}
+            </Button>
+            <Button type="button" variant="primary" leadingVisual={PlusIcon} onClick={() => setIsCreateOpen(true)}>
+              {t('account.profileKeys.newKey')}
+            </Button>
+          </Box>
+        ) : null}
       </Box>
 
       {error ? <ErrorBanner message={error} /> : null}
+      {isGuest ? (
+        <Box className="guest-retention-notice" role="status">
+          <KeyIcon size={18} />
+          <Text as="p">{t('account.profileKeys.guestRetentionNotice', {days: sortedProfiles[0]?.guest_retention_days ?? 360})}</Text>
+        </Box>
+      ) : null}
       {isLoading ? <LoadingState /> : null}
       {!isLoading && sortedProfiles.length === 0 ? (
         <EmptyState title={t('account.profileKeys.emptyTitle')} message={t('account.profileKeys.emptyMessage')} />
@@ -188,26 +234,30 @@ export function ProfileKeysPage() {
               <Button type="button" size="small" leadingVisual={FileDirectoryIcon} onClick={() => navigate(`/account/profiles/${profile.id}`)}>
                 {t('account.profileKeys.viewFiles')}
               </Button>
-              <Button
-                type="button"
-                size="small"
-                leadingVisual={SyncIcon}
-                aria-label={t('account.profileKeys.refreshKeyFor', {name: profile.display_name || profile.id})}
-                onClick={() => setPendingAction({type: 'refresh', profile})}
-                disabled={Boolean(profile.revoked_at)}
-              >
-                {t('account.profileKeys.refreshKey')}
-              </Button>
-              <Button
-                type="button"
-                size="small"
-                variant="danger"
-                leadingVisual={TrashIcon}
-                aria-label={t('account.profileKeys.deleteKeyFor', {name: profile.display_name || profile.id})}
-                onClick={() => setPendingAction({type: 'delete', profile})}
-              >
-                {t('account.profileKeys.deleteKey')}
-              </Button>
+              {!isGuest ? (
+                <>
+                  <Button
+                    type="button"
+                    size="small"
+                    leadingVisual={SyncIcon}
+                    aria-label={t('account.profileKeys.refreshKeyFor', {name: profile.display_name || profile.id})}
+                    onClick={() => setPendingAction({type: 'refresh', profile})}
+                    disabled={Boolean(profile.revoked_at)}
+                  >
+                    {t('account.profileKeys.refreshKey')}
+                  </Button>
+                  <Button
+                    type="button"
+                    size="small"
+                    variant="danger"
+                    leadingVisual={TrashIcon}
+                    aria-label={t('account.profileKeys.deleteKeyFor', {name: profile.display_name || profile.id})}
+                    onClick={() => setPendingAction({type: 'delete', profile})}
+                  >
+                    {t('account.profileKeys.deleteKey')}
+                  </Button>
+                </>
+              ) : null}
             </Box>
           </Box>
         ))}
@@ -229,6 +279,23 @@ export function ProfileKeysPage() {
                 placeholder={t('account.profileKeys.displayNamePlaceholder')}
                 autoFocus
               />
+            </label>
+          </FormDialog>
+        </form>
+      ) : null}
+
+      {isImportOpen ? (
+        <form onSubmit={handleImport}>
+          <FormDialog
+            title={t('account.profileKeys.importTitle')}
+            submitText={t('account.profileKeys.importSubmit')}
+            onCancel={() => { setImportError(null); setIsImportOpen(false) }}
+            isBusy={isBusy}
+          >
+            {importError ? <ErrorBanner message={importError} /> : null}
+            <label className="field">
+              <span>{t('account.profileKeys.importKeyLabel')}</span>
+              <input value={importKey} onChange={(event) => setImportKey(event.target.value)} required autoFocus autoComplete="off" />
             </label>
           </FormDialog>
         </form>

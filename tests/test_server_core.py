@@ -7,7 +7,8 @@ from fastapi.testclient import TestClient
 from sqlalchemy import select
 
 from mas_unisync_server.main import create_app
-from mas_unisync_server.models import AuditLog, Ban, Lock, PersistentCurrent, PersistentDailyBackup, PersistentVersion, Profile, StorageBucket
+from mas_unisync_server.models import AuditLog, Ban, Lock, PersistentCurrent, PersistentDailyBackup, PersistentVersion, Profile, StorageBucket, User
+from mas_unisync_server import services as server_services
 from mas_unisync_server.settings import Settings
 
 
@@ -126,6 +127,180 @@ def upload_persistent(
         files={"file": ("persistent", payload, "application/octet-stream")},
         data={"renpy_version": "8.2.3", "mas_version": "0.12.15"},
     )
+
+
+def new_guest_profile(client: TestClient, *, now: datetime | None = None):
+    headers = {"X-Test-Now": now.isoformat()} if now else {}
+    response = client.post("/v1/guest/profile-key", headers=headers)
+    assert response.status_code == 201
+    return response.json()
+
+
+def test_guest_profile_key_creation_is_unique_and_audited(client):
+    now = datetime(2026, 1, 1, 10, 0, tzinfo=timezone.utc)
+
+    first = new_guest_profile(client, now=now)
+    second = new_guest_profile(client, now=now)
+
+    assert first["profile_key"].startswith("maspk_")
+    assert first["profile_key"] != second["profile_key"]
+    assert first["is_guest"] is True
+    assert first["guest_retention_days"] == 360
+    assert first["guest_expires_at"] == (now + timedelta(days=360)).isoformat()
+    with client.app.state.SessionLocal() as db:
+        guests = list(db.scalars(select(User).where(User.role == "guest").order_by(User.id)))
+        profile_counts = [len(user.profiles) for user in guests]
+        actions = [log.action for log in db.scalars(select(AuditLog).order_by(AuditLog.id))]
+    assert len(guests) == 2
+    assert profile_counts == [1, 1]
+    assert actions == ["guest.profile_key.create", "guest.profile_key.create"]
+
+
+def test_guest_login_allows_read_only_archive_access(client):
+    guest = new_guest_profile(client)
+
+    login_response = client.post("/login/guest", json={"profile_key": guest["profile_key"]})
+
+    assert login_response.status_code == 200
+    assert login_response.json()["user"]["role"] == "guest"
+    listed = client.get("/account/profile-keys")
+    assert listed.status_code == 200
+    assert [item["id"] for item in listed.json()["items"]] == [guest["id"]]
+    assert client.get(f"/account/profiles/{guest['id']}").status_code == 200
+    for response in (
+        client.post("/account/profile-keys", json={"display_name": "Nope"}),
+        client.post("/account/profile-keys/import-guest", json={"profile_key": guest["profile_key"]}),
+        client.post(f"/account/profile-keys/{guest['id']}/refresh"),
+        client.delete(f"/account/profile-keys/{guest['id']}"),
+    ):
+        assert response.status_code == 403
+        assert response.json()["detail"]["code"] == "guest_account_read_only"
+
+
+def test_guest_login_rejects_normal_invalid_and_banned_keys(client):
+    normal = new_profile(client)
+    client.post("/logout")
+
+    normal_login = client.post("/login/guest", json={"profile_key": normal["profile_key"]})
+    invalid_login = client.post("/login/guest", json={"profile_key": "maspk_missing"})
+    guest = new_guest_profile(client)
+    with client.app.state.SessionLocal() as db:
+        db.add(Ban(target_type="key", target_id=guest["id"], reason="blocked"))
+        db.commit()
+    banned_login = client.post("/login/guest", json={"profile_key": guest["profile_key"]})
+
+    assert normal_login.status_code == 403
+    assert normal_login.json()["detail"]["code"] == "profile_key_not_guest"
+    assert invalid_login.status_code == 401
+    assert invalid_login.json()["detail"]["code"] == "invalid_profile_key"
+    assert banned_login.status_code == 403
+    assert banned_login.json()["detail"]["code"] == "banned"
+
+
+def test_guest_session_can_release_lock_download_and_restore_its_archive(client):
+    guest = new_guest_profile(client)
+    key = guest["profile_key"]
+    lease = acquire_lock(client, key)
+    base = datetime(2026, 1, 1, 10, 0, tzinfo=timezone.utc)
+    assert upload_persistent(client, key, lease, b"first", now=base).status_code == 201
+    assert upload_persistent(client, key, lease, b"second", now=base + timedelta(days=1)).status_code == 201
+    backups = client.get("/v1/persistent/backups", headers={"X-MAS-Profile-Key": key}).json()["items"]
+
+    assert client.post("/login/guest", json={"profile_key": key}).status_code == 200
+    assert client.post(f"/account/profiles/{guest['id']}/lock/release").status_code == 204
+    current = client.get(f"/account/profiles/{guest['id']}/persistent/current/download")
+    assert current.content == b"second"
+    restored = client.post(
+        f"/account/profiles/{guest['id']}/persistent/backups/{backups[-1]['id']}/restore"
+    )
+    assert restored.status_code == 200
+    assert client.get(f"/account/profiles/{guest['id']}/persistent/current/download").content == b"first"
+
+
+def test_import_guest_profile_preserves_key_archive_lock_and_objects(client):
+    guest = new_guest_profile(client)
+    key = guest["profile_key"]
+    lease = acquire_lock(client, key)
+    base = datetime(2026, 1, 1, 10, 0, tzinfo=timezone.utc)
+    assert upload_persistent(client, key, lease, b"first", now=base).status_code == 201
+    assert upload_persistent(client, key, lease, b"second", now=base + timedelta(days=1)).status_code == 201
+    with client.app.state.SessionLocal() as db:
+        old_owner_id = db.get(Profile, guest["id"]).user_id
+        old_lock_id = db.scalar(select(Lock.id).where(Lock.profile_id == guest["id"]))
+        old_version_ids = list(db.scalars(select(PersistentVersion.id).where(PersistentVersion.profile_id == guest["id"]).order_by(PersistentVersion.id)))
+        old_backup_ids = list(db.scalars(select(PersistentDailyBackup.id).where(PersistentDailyBackup.profile_id == guest["id"]).order_by(PersistentDailyBackup.id)))
+        object_paths = list(db.scalars(select(PersistentVersion.object_path).where(PersistentVersion.profile_id == guest["id"])))
+
+    assert client.post("/login/guest", json={"profile_key": key}).status_code == 200
+    backups = client.get(f"/account/profiles/{guest['id']}/persistent/backups").json()["items"]
+    assert client.post(
+        f"/account/profiles/{guest['id']}/persistent/backups/{backups[-1]['id']}/restore"
+    ).status_code == 200
+
+    owner = login(client)["user"]
+    imported = client.post("/account/profile-keys/import-guest", json={"profile_key": key})
+
+    assert imported.status_code == 200
+    assert imported.json()["profile_key"] == key
+    assert imported.json()["is_guest"] is False
+    with client.app.state.SessionLocal() as db:
+        profile = db.get(Profile, guest["id"])
+        assert profile.user_id == owner["id"]
+        assert db.get(User, old_owner_id) is None
+        assert db.scalar(select(Lock.id).where(Lock.profile_id == guest["id"])) == old_lock_id
+        assert list(db.scalars(select(PersistentVersion.id).where(PersistentVersion.profile_id == guest["id"]).order_by(PersistentVersion.id))) == old_version_ids
+        assert list(db.scalars(select(PersistentDailyBackup.id).where(PersistentDailyBackup.profile_id == guest["id"]).order_by(PersistentDailyBackup.id))) == old_backup_ids
+        guest_audit = db.scalar(
+            select(AuditLog).where(AuditLog.action == "persistent.backup.restore")
+        )
+        assert guest_audit.actor_user_id is None
+        assert guest_audit.actor_role == "guest"
+        actions = [log.action for log in db.scalars(select(AuditLog).order_by(AuditLog.id))]
+    assert all((client.app.state.storage.root / path).exists() for path in object_paths)
+    assert "guest.profile_key.import" in actions
+
+
+def test_import_guest_profile_reports_invalid_normal_claimed_and_quota_errors(client):
+    normal = new_profile(client)
+    guest = new_guest_profile(client)
+    imported = client.post("/account/profile-keys/import-guest", json={"profile_key": guest["profile_key"]})
+    assert imported.status_code == 200
+
+    invalid = client.post("/account/profile-keys/import-guest", json={"profile_key": "maspk_missing"})
+    normal_key = client.post("/account/profile-keys/import-guest", json={"profile_key": normal["profile_key"]})
+    claimed = client.post("/account/profile-keys/import-guest", json={"profile_key": guest["profile_key"]})
+
+    assert invalid.status_code == 404
+    assert invalid.json()["detail"]["code"] == "invalid_profile_key"
+    assert normal_key.status_code == 409
+    assert normal_key.json()["detail"]["code"] == "profile_key_not_guest"
+    assert claimed.status_code == 409
+    assert claimed.json()["detail"]["code"] == "guest_profile_already_claimed"
+
+    client.post("/logout")
+    login(client, "admin@example.com")
+    settings = client.get("/admin/settings").json()["settings"]
+    settings["max_active_profiles_per_account"] = 1
+    assert client.put("/admin/settings", json=settings).status_code == 200
+    client.post("/logout")
+    login(client)
+    quota_guest = new_guest_profile(client)
+    quota = client.post("/account/profile-keys/import-guest", json={"profile_key": quota_guest["profile_key"]})
+    assert quota.status_code == 409
+    assert quota.json()["detail"]["code"] == "active_profile_limit_exceeded"
+    with client.app.state.SessionLocal() as db:
+        quota_profile = db.get(Profile, quota_guest["id"])
+        assert quota_profile.user.role == "guest"
+
+
+def test_admin_user_list_excludes_temporary_guest_users(client):
+    new_guest_profile(client)
+    login(client, "admin@example.com")
+
+    users = client.get("/admin/users")
+
+    assert users.status_code == 200
+    assert all(user["role"] != "guest" for user in users.json()["items"])
 
 
 def test_flarum_login_imports_user_and_maps_admin_role(client):
@@ -580,6 +755,7 @@ def test_admin_settings_default_from_origin_save_and_audit(client):
         "frontend_web_url": "http://testserver",
         "profile_storage_limit_bytes": 10 * 1024 * 1024,
         "max_active_profiles_per_account": 3,
+        "guest_key_retention_days": 360,
         "active_storage_bucket_id": default_settings["storage_buckets"][0]["id"],
         "storage_buckets": [
             {
@@ -607,6 +783,7 @@ def test_admin_settings_default_from_origin_save_and_audit(client):
             "frontend_web_url": "https://portal.example.test",
             "profile_storage_limit_bytes": 12345,
             "max_active_profiles_per_account": 7,
+            "guest_key_retention_days": 45,
         },
         headers={"User-Agent": "settings-agent"},
     )
@@ -618,6 +795,7 @@ def test_admin_settings_default_from_origin_save_and_audit(client):
         "frontend_web_url": "https://portal.example.test",
         "profile_storage_limit_bytes": 12345,
         "max_active_profiles_per_account": 7,
+        "guest_key_retention_days": 45,
         "active_storage_bucket_id": default_settings["storage_buckets"][0]["id"],
         "storage_buckets": default_settings["storage_buckets"],
     }
@@ -703,6 +881,161 @@ def test_admin_settings_reject_non_admin_and_invalid_values(client):
     )
 
     assert invalid.status_code == 422
+
+    invalid_guest_retention = client.put(
+        "/admin/settings",
+        json={
+            "backend_api_url": "",
+            "frontend_web_url": "",
+            "profile_storage_limit_bytes": 1,
+            "max_active_profiles_per_account": 1,
+            "guest_key_retention_days": 0,
+        },
+    )
+    assert invalid_guest_retention.status_code == 422
+
+
+def test_guest_cleanup_uses_last_activity_and_does_not_touch_normal_profiles(client):
+    cleanup = getattr(server_services, "cleanup_expired_guest_profiles", None)
+    assert callable(cleanup)
+    now = datetime(2026, 12, 31, 10, 0, tzinfo=timezone.utc)
+    expired = new_guest_profile(client)
+    recent = new_guest_profile(client)
+    normal = new_profile(client)
+    lease = acquire_lock(client, expired["profile_key"])
+    assert upload_persistent(client, expired["profile_key"], lease, b"expired-cloud").status_code == 201
+
+    with client.app.state.SessionLocal() as db:
+        expired_profile = db.get(Profile, expired["id"])
+        expired_profile.created_at = now - timedelta(days=361)
+        expired_profile.last_used_at = None
+        recent_profile = db.get(Profile, recent["id"])
+        recent_profile.created_at = now - timedelta(days=500)
+        recent_profile.last_used_at = now - timedelta(days=30)
+        normal_profile = db.get(Profile, normal["id"])
+        normal_profile.created_at = now - timedelta(days=500)
+        normal_profile.last_used_at = None
+        db.add(
+            AuditLog(
+                actor_user_id=expired_profile.user_id,
+                actor_role="guest",
+                action="guest.test.action",
+                target_profile_id=expired_profile.id,
+                created_at=now - timedelta(days=361),
+            )
+        )
+        object_path = db.scalar(
+            select(PersistentVersion.object_path).where(PersistentVersion.profile_id == expired["id"])
+        )
+        db.commit()
+
+    with client.app.state.SessionLocal() as db:
+        result = cleanup(db, client.app.state.settings, now)
+
+    assert result == {"deleted": 1, "storage_failures": 0}
+    assert not (client.app.state.storage.root / object_path).exists()
+    with client.app.state.SessionLocal() as db:
+        assert db.get(Profile, expired["id"]) is None
+        assert db.get(Profile, recent["id"]) is not None
+        assert db.get(Profile, normal["id"]) is not None
+        assert db.scalar(select(Lock).where(Lock.profile_id == expired["id"])) is None
+        assert db.scalars(select(PersistentVersion).where(PersistentVersion.profile_id == expired["id"])).all() == []
+        guest_audit = db.scalar(select(AuditLog).where(AuditLog.action == "guest.test.action"))
+        assert guest_audit.actor_user_id is None
+        assert guest_audit.actor_role == "guest"
+        actions = [log.action for log in db.scalars(select(AuditLog).order_by(AuditLog.id))]
+    assert "system.guest_profile.cleanup" in actions
+
+
+def test_guest_cleanup_keeps_database_rows_when_storage_delete_fails_and_retries(client, monkeypatch):
+    cleanup = getattr(server_services, "cleanup_expired_guest_profiles", None)
+    assert callable(cleanup)
+    now = datetime(2026, 12, 31, 10, 0, tzinfo=timezone.utc)
+    guest = new_guest_profile(client)
+    lease = acquire_lock(client, guest["profile_key"])
+    assert upload_persistent(client, guest["profile_key"], lease, b"retry-cloud").status_code == 201
+    with client.app.state.SessionLocal() as db:
+        profile = db.get(Profile, guest["id"])
+        profile.created_at = now - timedelta(days=361)
+        profile.last_used_at = None
+        db.commit()
+
+    original_delete = server_services.delete_version_object
+
+    def fail_delete(*args, **kwargs):
+        raise OSError("storage unavailable")
+
+    monkeypatch.setattr(server_services, "delete_version_object", fail_delete)
+    with client.app.state.SessionLocal() as db:
+        failed = cleanup(db, client.app.state.settings, now)
+    assert failed == {"deleted": 0, "storage_failures": 1}
+    with client.app.state.SessionLocal() as db:
+        assert db.get(Profile, guest["id"]) is not None
+        assert db.scalar(select(Lock).where(Lock.profile_id == guest["id"])) is not None
+        assert db.scalars(select(PersistentVersion).where(PersistentVersion.profile_id == guest["id"])).all()
+        actions = [log.action for log in db.scalars(select(AuditLog).order_by(AuditLog.id))]
+    assert "system.guest_profile.cleanup_storage_failed" in actions
+
+    monkeypatch.setattr(server_services, "delete_version_object", original_delete)
+    with client.app.state.SessionLocal() as db:
+        retried = cleanup(db, client.app.state.settings, now)
+    assert retried == {"deleted": 1, "storage_failures": 0}
+    with client.app.state.SessionLocal() as db:
+        assert db.get(Profile, guest["id"]) is None
+
+
+def test_guest_cleanup_uses_admin_configured_retention_days(client):
+    cleanup = server_services.cleanup_expired_guest_profiles
+    login(client, "admin@example.com")
+    settings_payload = client.get("/admin/settings").json()["settings"]
+    settings_payload["guest_key_retention_days"] = 30
+    assert client.put("/admin/settings", json=settings_payload).status_code == 200
+    client.post("/logout")
+    created_at = datetime(2026, 1, 1, 10, 0, tzinfo=timezone.utc)
+    guest = new_guest_profile(client, now=created_at)
+
+    with client.app.state.SessionLocal() as db:
+        result = cleanup(db, client.app.state.settings, created_at + timedelta(days=31))
+
+    assert result == {"deleted": 1, "storage_failures": 0}
+    with client.app.state.SessionLocal() as db:
+        assert db.get(Profile, guest["id"]) is None
+
+
+def test_app_startup_runs_guest_cleanup_once(tmp_path):
+    settings = Settings(
+        database_url=f"sqlite:///{tmp_path / 'startup.db'}",
+        object_storage_path=tmp_path / "startup-objects",
+        session_secret="test-secret",
+    )
+    app = create_app(settings=settings, flarum_client=FakeFlarumClient())
+    old = datetime.now(timezone.utc) - timedelta(days=361)
+    with app.state.SessionLocal() as db:
+        user = User(
+            flarum_user_id="guest:startup",
+            username="guest-startup",
+            role="guest",
+            flarum_groups_json="[]",
+            created_at=old,
+            updated_at=old,
+        )
+        db.add(user)
+        db.flush()
+        profile = Profile(
+            user_id=user.id,
+            profile_key_plaintext="maspk_startup_expired",
+            created_at=old,
+            updated_at=old,
+        )
+        db.add(profile)
+        db.commit()
+        profile_id = profile.id
+
+    with TestClient(app):
+        pass
+
+    with app.state.SessionLocal() as db:
+        assert db.get(Profile, profile_id) is None
 
 
 def test_admin_settings_manage_storage_buckets_and_active_local_uploads(client):

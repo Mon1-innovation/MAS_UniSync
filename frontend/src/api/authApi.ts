@@ -8,6 +8,13 @@ export function loginFlarum(identification: string, password: string) {
   })
 }
 
+export function loginGuest(profileKey: string) {
+  return request<LoginResponse>('/login/guest', {
+    method: 'POST',
+    body: {profile_key: profileKey},
+  })
+}
+
 export function logout() {
   return request<void>('/logout', {method: 'POST'})
 }

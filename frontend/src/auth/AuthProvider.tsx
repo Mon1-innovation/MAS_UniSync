@@ -1,7 +1,7 @@
 import {createContext, useCallback, useContext, useEffect, useMemo, useState} from 'react'
 import {useNavigate} from 'react-router-dom'
 import {ApiError} from '../api/client'
-import {loginFlarum, logout as logoutRequest} from '../api/authApi'
+import {loginFlarum, loginGuest as loginGuestRequest, logout as logoutRequest} from '../api/authApi'
 import {listProfileKeys} from '../api/profileKeysApi'
 import type {User} from '../api/types'
 import {clearStoredUser, readStoredUser, storeUser} from './storage'
@@ -10,6 +10,7 @@ interface AuthContextValue {
   user: User | null
   isCheckingSession: boolean
   login: (identification: string, password: string) => Promise<User>
+  loginGuest: (profileKey: string) => Promise<User>
   logout: () => Promise<void>
   setUser: (user: User | null) => void
 }
@@ -69,6 +70,16 @@ export function AuthProvider({children}: {children: React.ReactNode}) {
     [navigate, setUser],
   )
 
+  const loginGuest = useCallback(
+    async (profileKey: string) => {
+      const response = await loginGuestRequest(profileKey)
+      setUser(response.user)
+      navigate('/account/profile-keys', {replace: true})
+      return response.user
+    },
+    [navigate, setUser],
+  )
+
   const logout = useCallback(async () => {
     try {
       await logoutRequest()
@@ -79,8 +90,8 @@ export function AuthProvider({children}: {children: React.ReactNode}) {
   }, [navigate, setUser])
 
   const value = useMemo(
-    () => ({user, isCheckingSession, login, logout, setUser}),
-    [isCheckingSession, login, logout, setUser, user],
+    () => ({user, isCheckingSession, login, loginGuest, logout, setUser}),
+    [isCheckingSession, login, loginGuest, logout, setUser, user],
   )
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>

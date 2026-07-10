@@ -15,6 +15,7 @@ const emptySettings: SystemSettings = {
   frontend_web_url: '',
   profile_storage_limit_bytes: 10 * 1024 * 1024,
   max_active_profiles_per_account: 3,
+  guest_key_retention_days: 360,
   active_storage_bucket_id: null,
   storage_buckets: [],
 }
@@ -23,6 +24,7 @@ function normalizeSettings(settings: SystemSettings): SystemSettings {
   const storageBuckets = settings.storage_buckets ?? []
   return {
     ...settings,
+    guest_key_retention_days: settings.guest_key_retention_days ?? 360,
     active_storage_bucket_id: settings.active_storage_bucket_id ?? storageBuckets.find((bucket) => bucket.is_active)?.id ?? null,
     storage_buckets: storageBuckets.map((bucket) => ({
       ...bucket,
@@ -295,6 +297,16 @@ export function AdminSettingsPage() {
                 step={1}
                 value={settings.max_active_profiles_per_account}
                 onChange={(event) => updateField('max_active_profiles_per_account', Number(event.target.value))}
+              />
+            </label>
+            <label className="field">
+              <span>{t('admin.settings.guestKeyRetentionDays')}</span>
+              <input
+                type="number"
+                min={1}
+                step={1}
+                value={settings.guest_key_retention_days}
+                onChange={(event) => updateField('guest_key_retention_days', Number(event.target.value))}
               />
             </label>
             <Box className="settings-section">

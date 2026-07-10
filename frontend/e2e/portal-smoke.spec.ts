@@ -22,6 +22,9 @@ const adminUser = {
 
 test.beforeEach(async ({page, context}) => {
   await context.grantPermissions(['clipboard-read', 'clipboard-write'])
+  await page.addInitScript(() => {
+    window.localStorage.setItem('mas_unisync_language', 'en')
+  })
   await page.route('**/*', async (route) => {
     const url = new URL(route.request().url())
     const path = url.pathname
