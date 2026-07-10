@@ -26,8 +26,8 @@ Only `persistent` is synchronized. Normal Ren'Py save slots are out of scope.
 - The center server URL is also stored through MAS API key storage. A production
   default value will be provided after the service is live.
 - Server-side backups use a 10-day daily rotation, one backup per day.
-- Local backups are created before overwriting local persistent from the cloud,
-  retaining only the latest 10 local backups.
+- The submod does not create local backup snapshots before applying cloud
+  persistent data.
 - Conflict policy is cloud-first.
 - The server can inspect metadata and admins can download persistent files; no
   end-to-end encryption is required.
@@ -457,10 +457,11 @@ The panel should guide the user to:
 7. If the profile key is already locked, raise exception.
 8. Fetch cloud current persistent metadata.
 9. Compare remote sha256 with local persistent sha256.
-10. If remote is newer, create a local backup, download remote persistent, and
-    replace local persistent.
+10. If remote is newer, download remote persistent and either load it into
+    Ren'Py memory during startup or replace the local persistent file on the
+    non-memory path.
 11. If local and remote conflict without a safe shared baseline, cloud wins:
-    create a local backup, then download and use the cloud persistent.
+    download and use the cloud persistent.
 12. If local is newer or unsynced and no conflict is detected, enqueue upload.
 13. Start heartbeat thread.
 14. Allow MAS startup to continue.
@@ -535,18 +536,13 @@ If the final upload attempt fails during `_quit`, the hook should raise an
 exception with a message that tells the user the cloud sync failed and that they
 should manually back up their local persistent before continuing.
 
-### Local Backups
+### Local Persistent Replacement
 
-Before replacing local persistent with a cloud version, the submod creates a
-local backup.
-
-Rules:
-
-- Keep only the latest 10 local backups.
-- Backups are stored outside `persistent` itself, under a dedicated UniSync
-  backup directory in the Ren'Py save area.
-- Backup filenames include timestamp and sha256 prefix.
-- Local backups are best-effort and do not replace server-side daily backups.
+When the non-memory sync path applies a cloud version, the submod writes the
+downloaded bytes to `persistent.unisync-new` and then renames that temporary
+file over the local `persistent`. It does not create or rotate local backup
+snapshots. Server-side daily backups remain the recovery mechanism for uploaded
+persistent versions.
 
 ### Persistent Type Guard
 

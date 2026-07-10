@@ -15,12 +15,11 @@ except (ImportError, ValueError):
 
 
 class SyncSession(object):
-    def __init__(self, api_url, profile_key, persistent_path, backup_dir, renpy_version=None, mas_version=None, urlopen=None):
+    def __init__(self, api_url, profile_key, persistent_path, renpy_version=None, mas_version=None, urlopen=None):
         self.api_base = core.api_base_url(api_url)
         self.host = core.normalize_host(api_url)
         self.profile_key = profile_key
         self.persistent_path = persistent_path
-        self.backup_dir = backup_dir
         self.renpy_version = renpy_version
         self.mas_version = mas_version
         self.urlopen = urlopen
@@ -136,7 +135,7 @@ class SyncSession(object):
                 core.load_persistent_bytes_into_renpy(body)
                 new_sha = remote_sha
             else:
-                new_sha = core.replace_persistent_from_bytes(body, self.persistent_path, self.backup_dir)
+                new_sha = core.replace_persistent_from_bytes(body, self.persistent_path)
             self.status.mark_download_success(new_sha)
             self.status.last_remote_sha256 = remote_sha
         else:

@@ -202,25 +202,6 @@ def test_display_text_escapes_braces_and_brackets_used_by_renpy_substitution():
     assert core.renpy_display_text(None) == ""
 
 
-def test_backup_rotation_keeps_latest_ten_files(tmp_path):
-    core = load_client_module("mas_unisync_core")
-    backup_dir = tmp_path / "unisync_backups"
-    persistent_file = tmp_path / "persistent"
-
-    for index in range(12):
-        persistent_file.write_bytes(f"payload-{index}".encode("ascii"))
-        core.create_local_backup(
-            str(persistent_file),
-            str(backup_dir),
-            timestamp=dt.datetime(2026, 1, 1, 12, 0, index),
-        )
-
-    backups = sorted(backup_dir.iterdir())
-    assert len(backups) == 10
-    assert backups[0].name.startswith("20260101-120002-")
-    assert backups[-1].name.startswith("20260101-120011-")
-
-
 def test_upload_state_skips_duplicate_hashes():
     core = load_client_module("mas_unisync_core")
     state = core.SyncStatus()

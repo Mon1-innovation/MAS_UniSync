@@ -21,9 +21,6 @@ init -968 python:
     def mas_unisync_persistent_path():
         return mas_unisync_core.get_persistent_path(mas_unisync_savedir())
 
-    def mas_unisync_backup_dir():
-        return mas_unisync_core.get_backup_dir(mas_unisync_savedir())
-
     def mas_unisync_versions():
         renpy_version = None
         try:
@@ -47,7 +44,6 @@ init -968 python:
             mas_unisync_get_host(),
             mas_unisync_get_profile_key(),
             mas_unisync_persistent_path(),
-            mas_unisync_backup_dir(),
             renpy_version=renpy_version,
             mas_version=mas_version
         )

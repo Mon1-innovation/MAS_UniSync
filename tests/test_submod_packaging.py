@@ -61,6 +61,25 @@ def test_core_helper_keeps_direct_in_memory_replacement():
     assert "renpy.game.persistent._update()" in core_source
 
 
+def test_submod_no_longer_creates_local_backup_snapshots():
+    core_source = Path("game/Submods/MAS_UniSync/mas_unisync_core.py").read_text(
+        encoding="utf-8"
+    )
+    sync_source = Path("game/Submods/MAS_UniSync/mas_unisync_sync.py").read_text(
+        encoding="utf-8"
+    )
+    hooks_source = Path("game/Submods/MAS_UniSync/hooks.rpy").read_text(
+        encoding="utf-8"
+    )
+
+    assert "MAS_UniSync_Backups" not in core_source
+    assert "create_local_backup" not in core_source
+    assert "rotate_local_backups" not in core_source
+    assert "get_backup_dir" not in core_source
+    assert "backup_dir" not in sync_source
+    assert "mas_unisync_backup_dir" not in hooks_source
+
+
 def test_remote_persistent_current_eli_data_is_cleaned_after_memory_helper_replacement():
     core_source = Path("game/Submods/MAS_UniSync/mas_unisync_core.py").read_text(
         encoding="utf-8"

@@ -3,12 +3,10 @@ from __future__ import print_function
 import datetime
 import hashlib
 import os
-import shutil
 
 
 DEFAULT_HOST = "100.72.137.92"
 API_PORT = 8000
-MAX_LOCAL_BACKUPS = 10
 PROFILE_KEY_FEATURE = "MAS_UniSync_Profile_Key"
 HOST_FEATURE = "MAS_UniSync_Host"
 
@@ -217,37 +215,7 @@ def ensure_dir(path):
         os.makedirs(path)
 
 
-def create_local_backup(persistent_path, backup_dir, timestamp=None, max_backups=MAX_LOCAL_BACKUPS):
-    if not os.path.isfile(persistent_path):
-        return None
-    ensure_dir(backup_dir)
-    timestamp = timestamp or utc_now()
-    sha_prefix = sha256_file(persistent_path)[:12]
-    filename = "{0}-{1}.persistent".format(timestamp.strftime("%Y%m%d-%H%M%S"), sha_prefix)
-    target = os.path.join(backup_dir, filename)
-    shutil.copy2(persistent_path, target)
-    rotate_local_backups(backup_dir, max_backups=max_backups)
-    return target
-
-
-def rotate_local_backups(backup_dir, max_backups=MAX_LOCAL_BACKUPS):
-    if not os.path.isdir(backup_dir):
-        return
-    entries = [
-        os.path.join(backup_dir, name)
-        for name in os.listdir(backup_dir)
-        if os.path.isfile(os.path.join(backup_dir, name))
-    ]
-    entries.sort()
-    for old_path in entries[:-max_backups]:
-        try:
-            os.unlink(old_path)
-        except OSError:
-            pass
-
-
-def replace_persistent_from_bytes(data, persistent_path, backup_dir):
-    create_local_backup(persistent_path, backup_dir)
+def replace_persistent_from_bytes(data, persistent_path):
     ensure_dir(os.path.dirname(persistent_path))
     tmp_path = persistent_path + ".unisync-new"
     with open(tmp_path, "wb") as handle:
@@ -260,10 +228,6 @@ def replace_persistent_from_bytes(data, persistent_path, backup_dir):
 
 def get_persistent_path(savedir):
     return os.path.join(savedir, "persistent")
-
-
-def get_backup_dir(savedir):
-    return os.path.join(savedir, "MAS_UniSync_Backups")
 
 
 def load_pickle_payload(payload):
