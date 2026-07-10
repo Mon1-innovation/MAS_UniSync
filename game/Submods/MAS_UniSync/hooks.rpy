@@ -15,6 +15,7 @@ init -968 python:
     mas_unisync_original_persistent_save = None
     mas_unisync_lock_not_held = False
     mas_unisync_startup_failed = False
+    mas_unisync_guest_warning_visible = False
 
     def mas_unisync_savedir():
         return renpy.config.savedir
@@ -142,6 +143,7 @@ init -968 python:
         )
 
     def mas_unisync_show_guest_warning_if_needed(resolved_profile):
+        global mas_unisync_guest_warning_visible
         today = datetime.date.today().isoformat()
         last_warning_date = getattr(persistent, "_mas_unisync_guest_warning_date", "")
         if not mas_unisync_sync.should_show_guest_warning(
@@ -152,7 +154,7 @@ init -968 python:
             return False
         persistent._mas_unisync_guest_warning_date = today
         mas_unisync_original_persistent_save()
-        renpy.show_screen("mas_unisync_guest_warning")
+        mas_unisync_guest_warning_visible = True
         return True
 
     def mas_unisync_startup_sync(force=False, raise_on_failure=False, upload_after_sync=False, load_remote_into_memory=False):
@@ -339,6 +341,8 @@ init -968 python:
                 config.overlay_screens.append("mas_unisync_lock_not_held_overlay")
             if "mas_unisync_startup_failure_overlay" not in config.overlay_screens:
                 config.overlay_screens.append("mas_unisync_startup_failure_overlay")
+            if "mas_unisync_guest_warning_overlay" not in config.overlay_screens:
+                config.overlay_screens.append("mas_unisync_guest_warning_overlay")
         except Exception:
             pass
 

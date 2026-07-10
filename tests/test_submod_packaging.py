@@ -184,7 +184,22 @@ def test_first_start_guest_flow_persists_marker_uploads_and_warns_daily():
     assert "mas_unisync_save_key(mas_unisync_core.PROFILE_KEY_FEATURE, profile_key)" in hooks_source
     assert "mas_unisync_original_persistent_save()" in hooks_source
     assert "mas_unisync_startup_sync(force=True, upload_after_sync=True, load_remote_into_memory=True)" in hooks_source
+    assert "mas_unisync_guest_warning_visible = False" in hooks_source
+    assert "mas_unisync_guest_warning_visible = True" in hooks_source
+    assert "def mas_unisync_dismiss_guest_warning():" in header_source
+    assert 'renpy.show_screen("mas_unisync_guest_warning")' not in hooks_source
+    assert 'config.overlay_screens.append("mas_unisync_guest_warning_overlay")' in hooks_source
     assert "screen mas_unisync_guest_warning():" in header_source
+    assert "screen mas_unisync_guest_warning_overlay():" in header_source
+    assert "if mas_unisync_guest_warning_visible:" in header_source
+    guest_warning_source = header_source.split(
+        "screen mas_unisync_guest_warning():", 1
+    )[1].split(
+        "screen mas_unisync_guest_warning_overlay():", 1
+    )[0]
+    assert "modal True" not in guest_warning_source
+    assert "align (0.98, 0.04)" in guest_warning_source
+    assert "Function(mas_unisync_dismiss_guest_warning)" in guest_warning_source
     assert "长期未使用" in header_source
     assert "云端存档" in header_source
 

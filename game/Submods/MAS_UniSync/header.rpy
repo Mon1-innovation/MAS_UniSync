@@ -262,6 +262,11 @@ init -989 python:
             mas_unisync_guard_help_expanded.add(index)
         renpy.restart_interaction()
 
+    def mas_unisync_dismiss_guest_warning():
+        global mas_unisync_guest_warning_visible
+        mas_unisync_guest_warning_visible = False
+        renpy.restart_interaction()
+
 init -969 python:
     store.mas_registerAPIKey(
         mas_unisync_core.HOST_FEATURE,
@@ -460,13 +465,12 @@ screen mas_unisync_startup_failure_overlay():
 
 screen mas_unisync_guest_warning():
     zorder 219
-    modal True
     frame:
-        align (0.5, 0.5)
-        xmaximum 600
-        padding (18, 16)
+        align (0.98, 0.04)
+        xmaximum 520
+        padding (14, 12)
         vbox:
-            spacing 10
+            spacing 8
             text _("当前正在使用游客 Profile Key"):
                 style "main_menu_version"
             text _("游客 Key 长期未使用会被自动回收，并同时删除全部云端存档。请在中心网站登录正式 Flarum 账号并导入此游客 Key，以长期保留同步档案。"):
@@ -476,7 +480,11 @@ screen mas_unisync_guest_warning():
                 text_align 0.0
             textbutton _("知道了"):
                 style "mas_button_simple"
-                action Hide("mas_unisync_guest_warning")
+                action Function(mas_unisync_dismiss_guest_warning)
+
+screen mas_unisync_guest_warning_overlay():
+    if mas_unisync_guest_warning_visible:
+        use mas_unisync_guest_warning
 
 screen mas_unisync_settingpane():
     python:
