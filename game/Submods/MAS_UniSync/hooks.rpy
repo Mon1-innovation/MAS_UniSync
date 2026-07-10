@@ -106,6 +106,9 @@ init -968 python:
             while not mas_unisync_stop_event.wait(15.0):
                 try:
                     mas_unisync_session.heartbeat()
+                except mas_unisync_core.UniSyncLockNotHeldError as exc:
+                    mas_unisync_enter_lock_not_held_mode(exc)
+                    break
                 except Exception as exc:
                     mas_unisync_core.submod_log_debug(str(exc))
                     mas_unisync_session.status.mark_error(exc)
@@ -270,6 +273,8 @@ init -968 python:
                 result = mas_unisync_session.upload_if_changed()
             mas_unisync_update_status(mas_unisync_session.status)
             return result
+        except mas_unisync_core.UniSyncLockNotHeldError as exc:
+            return mas_unisync_enter_lock_not_held_mode(exc)
         except Exception as exc:
             mas_unisync_core.submod_log_debug(str(exc))
             mas_unisync_session.status.mark_error(exc)
@@ -295,6 +300,8 @@ init -968 python:
             try:
                 mas_unisync_session.upload_if_changed()
                 mas_unisync_update_status(mas_unisync_session.status)
+            except mas_unisync_core.UniSyncLockNotHeldError as exc:
+                mas_unisync_enter_lock_not_held_mode(exc)
             except Exception as exc:
                 mas_unisync_core.submod_log_debug(str(exc))
                 mas_unisync_session.status.mark_error(exc)

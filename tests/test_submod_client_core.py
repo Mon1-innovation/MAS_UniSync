@@ -22,14 +22,16 @@ def load_client_module(name: str):
     return module
 
 
-def test_api_url_normalization_preserves_full_urls_and_migrates_legacy_hosts():
+def test_api_url_normalization_preserves_full_urls_and_ignores_legacy_hosts():
     core = load_client_module("mas_unisync_core")
 
+    assert core.normalize_api_url(None) == "https://api.unisync.0721play.icu"
+    assert core.normalize_api_url("") == "https://api.unisync.0721play.icu"
     assert core.normalize_api_url(" https://api.example.test:8443/base/ ") == "https://api.example.test:8443/base"
-    assert core.normalize_api_url("http://100.72.137.92:9000") == "http://100.72.137.92:9000"
-    assert core.normalize_api_url("100.72.137.92") == "http://100.72.137.92:8000"
-    assert core.normalize_api_url("100.72.137.92:9000") == "http://100.72.137.92:9000"
+    assert core.normalize_api_url("100.72.137.92") == "https://api.unisync.0721play.icu"
+    assert core.normalize_api_url("100.72.137.92:9000") == "https://api.unisync.0721play.icu"
     assert core.api_base_url("https://api.example.test:8443/base/") == "https://api.example.test:8443/base"
+    assert core.normalize_host("100.72.137.92") == "api.unisync.0721play.icu"
 
 
 def test_multipart_body_contains_file_and_optional_version_metadata(tmp_path):

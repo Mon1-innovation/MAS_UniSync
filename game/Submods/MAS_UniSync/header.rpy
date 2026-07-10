@@ -149,6 +149,18 @@ init -989 python:
             renpy.notify(_("MAS UniSync 连接失败：") + mas_unisync_core.renpy_safe_text(str(exc)))
         renpy.restart_interaction()
 
+    def mas_unisync_copy_profile_key():
+        profile_key = mas_unisync_get_profile_key()
+        if not profile_key:
+            renpy.notify(_("Profile Key 未配置"))
+            return
+        try:
+            pygame.scrap.put(pygame.SCRAP_TEXT, profile_key)
+            renpy.notify(_("MAS UniSync Profile Key 已复制"))
+        except Exception as exc:
+            mas_unisync_update_status(message=mas_unisync_core.renpy_safe_text(str(exc)))
+            renpy.notify(_("MAS UniSync 复制失败：") + mas_unisync_core.renpy_safe_text(str(exc)))
+
     def mas_unisync_clear_profile_key():
         try:
             if globals().get("mas_unisync_session") is not None:
@@ -516,6 +528,9 @@ screen mas_unisync_settingpane():
             textbutton _("粘贴 Profile Key"):
                 style "mas_button_simple"
                 action Function(mas_unisync_paste_profile_key)
+            textbutton _("复制当前 Profile Key"):
+                style "mas_button_simple"
+                action Function(mas_unisync_copy_profile_key)
             textbutton _("清除 Profile Key"):
                 style "mas_button_simple"
                 action Function(mas_unisync_clear_profile_key)

@@ -5,8 +5,7 @@ import hashlib
 import os
 
 
-DEFAULT_HOST = "100.72.137.92"
-API_PORT = 8000
+DEFAULT_HOST = "https://api.unisync.0721play.icu"
 PROFILE_KEY_FEATURE = "MAS_UniSync_Profile_Key"
 HOST_FEATURE = "MAS_UniSync_Host"
 
@@ -143,6 +142,9 @@ def utc_now():
 
 def normalize_host(value):
     raw = (value or DEFAULT_HOST).strip()
+    lowered = raw.lower()
+    if not (lowered.startswith("http://") or lowered.startswith("https://")):
+        raw = DEFAULT_HOST
     for prefix in ("http://", "https://"):
         if raw.lower().startswith(prefix):
             raw = raw[len(prefix):]
@@ -168,19 +170,7 @@ def normalize_api_url(value):
             host = rest.split("/", 1)[0]
             return "{0}://{1}".format(scheme, host).rstrip("/")
         return raw
-    if raw.startswith("["):
-        end = raw.find("]")
-        if end >= 0:
-            host = raw[: end + 1]
-            rest = raw[end + 1:]
-            if rest.startswith(":"):
-                return "http://{0}{1}".format(host, rest)
-            return "http://{0}:{1}".format(host, API_PORT)
-    if "/" in raw:
-        raw = raw.split("/", 1)[0]
-    if ":" in raw:
-        return "http://{0}".format(raw)
-    return "http://{0}:{1}".format(raw, API_PORT)
+    return DEFAULT_HOST
 
 
 def api_base_url(api_url):

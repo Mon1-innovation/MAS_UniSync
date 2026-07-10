@@ -47,6 +47,18 @@ class SyncSession(object):
             urlopen=self.urlopen,
         )
 
+    def request_json_with_lease(self, method, path, headers=None, data=None):
+        try:
+            return self.request_json(method, path, headers=headers, data=data)
+        except http.UniSyncHTTPError as exc:
+            if exc.status == 409 and exc.code == "invalid_lease":
+                self.status.lease_token = ""
+                self.status.lock_state = "not_held"
+                raise core.UniSyncLockNotHeldError(
+                    "Sync lock is no longer valid. Restart MAS after checking that no other client is active."
+                )
+            raise
+
     def request_bytes(self, method, path, headers=None, data=None):
         _status, body = http.request(
             method,
@@ -104,7 +116,7 @@ class SyncSession(object):
     def heartbeat(self):
         if not self.status.lease_token:
             return None
-        return self.request_json("POST", "/v1/locks/heartbeat", headers=self.headers(include_lease=True), data=b"")
+        return self.request_json_with_lease("POST", "/v1/locks/heartbeat", headers=self.headers(include_lease=True), data=b"")
 
     def release(self):
         if not self.status.lease_token:
@@ -163,7 +175,7 @@ class SyncSession(object):
             renpy_version=self.renpy_version,
             mas_version=self.mas_version,
         )
-        payload = self.request_json(
+        payload = self.request_json_with_lease(
             "POST",
             "/v1/persistent/upload",
             headers=self.headers(include_lease=True, extra={"Content-Type": content_type}),

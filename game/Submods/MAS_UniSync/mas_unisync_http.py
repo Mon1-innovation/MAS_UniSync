@@ -4,6 +4,7 @@ import json
 import hashlib
 import mimetypes
 import os
+import socket
 
 try:
     from urllib import request as urllib_request
@@ -20,7 +21,7 @@ class UniSyncHTTPError(Exception):
         self.code = code
 
 
-DEFAULT_TIMEOUT = 10
+DEFAULT_TIMEOUT = 30
 
 
 def generate_multipart_boundary():
@@ -134,6 +135,10 @@ def request(method, url, headers=None, data=None, timeout=DEFAULT_TIMEOUT, urlop
             "{0} {1} failed with HTTP {2}: {3}".format(method, url, exc.code, describe_error_body(body)),
             status=exc.code,
             code=extract_error_code(body),
+        )
+    except socket.timeout as exc:
+        raise UniSyncHTTPError(
+            "{0} {1} timed out after {2} seconds: {3}".format(method, url, timeout, exc)
         )
     except urllib_error.URLError as exc:
         reason = getattr(exc, "reason", exc)

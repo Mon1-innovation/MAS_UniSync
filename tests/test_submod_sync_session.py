@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import importlib.util
 import json
+import socket
 import sys
 from pathlib import Path
 from urllib.error import HTTPError
@@ -76,17 +77,17 @@ def test_sync_session_acquires_lock_uploads_and_releases(tmp_path):
             return FakeResponse(204)
         raise AssertionError(f"unexpected URL {request.full_url}")
 
-    session = sync.SyncSession("100.72.137.92", "maspk_test", str(persistent), urlopen=fake_urlopen)
+    session = sync.SyncSession("https://api.example.test", "maspk_test", str(persistent), urlopen=fake_urlopen)
     session.start()
     session.upload_if_changed()
     session.release()
 
     assert [request.full_url for request in requests] == [
-        "http://100.72.137.92:8000/v1/profile/resolve",
-        "http://100.72.137.92:8000/v1/locks/acquire",
-        "http://100.72.137.92:8000/v1/persistent/current",
-        "http://100.72.137.92:8000/v1/persistent/upload",
-        "http://100.72.137.92:8000/v1/locks/release",
+        "https://api.example.test/v1/profile/resolve",
+        "https://api.example.test/v1/locks/acquire",
+        "https://api.example.test/v1/persistent/current",
+        "https://api.example.test/v1/persistent/upload",
+        "https://api.example.test/v1/locks/release",
     ]
     assert header(requests[0], "X-MAS-Profile-Key") == "maspk_test"
     assert header(requests[3], "X-MAS-Lease-Token") == "lease_123"
@@ -154,16 +155,18 @@ def test_fetch_profile_keys_url_requests_public_config_from_api_url():
 
     assert result == "https://portal.example.test/account/profile-keys"
     assert len(requests) == 1
-    assert timeouts == [10]
+    assert timeouts == [30]
 
 
 def test_guest_provisioning_saves_key_marks_persistent_and_starts_initial_sync():
     sync = load_client_module("mas_unisync_sync")
     requests = []
+    timeouts = []
     events = []
 
     def fake_urlopen(request, timeout):
         requests.append(request)
+        timeouts.append(timeout)
         return FakeResponse(
             201,
             {
@@ -186,6 +189,7 @@ def test_guest_provisioning_saves_key_marks_persistent_and_starts_initial_sync()
     assert result["profile_key"] == "maspk_guest"
     assert requests[0].full_url == "https://api.example.test/root/v1/guest/profile-key"
     assert requests[0].get_method() == "POST"
+    assert timeouts == [30]
     assert events == [
         ("save_key", "maspk_guest"),
         ("mark_created", True),
@@ -271,7 +275,7 @@ def test_guest_warning_is_shown_only_once_per_natural_day_while_profile_is_guest
     assert sync.should_show_guest_warning(bound_profile, "2026-01-01", "2026-01-02") is False
 
 
-def test_sync_session_requests_use_ten_second_timeout(tmp_path):
+def test_sync_session_requests_use_thirty_second_timeout(tmp_path):
     sync = load_client_module("mas_unisync_sync")
     persistent = tmp_path / "persistent"
     persistent.write_bytes(b"local")
@@ -296,14 +300,34 @@ def test_sync_session_requests_use_ten_second_timeout(tmp_path):
         raise AssertionError(f"unexpected URL {request.full_url}")
 
     session = sync.SyncSession(
-        "100.72.137.92",
+        "https://api.example.test",
         "maspk_test",
         str(persistent),
         urlopen=fake_urlopen,
     )
     session.start(upload_after_sync=True)
 
-    assert timeouts == [10, 10, 10, 10]
+    assert timeouts == [30, 30, 30, 30]
+
+
+def test_socket_timeout_is_reported_with_request_context():
+    http = load_client_module("mas_unisync_http")
+
+    def timeout_urlopen(request, timeout):
+        raise socket.timeout("The read operation timed out")
+
+    with pytest.raises(http.UniSyncHTTPError) as exc_info:
+        http.request_json(
+            "POST",
+            "https://api.example.test/v1/guest/profile-key",
+            data=b"",
+            urlopen=timeout_urlopen,
+        )
+
+    assert str(exc_info.value) == (
+        "POST https://api.example.test/v1/guest/profile-key timed out after 30 seconds: "
+        "The read operation timed out"
+    )
 
 
 def test_acquire_lock_raises_lock_not_held_error_when_server_reports_conflict(tmp_path):
@@ -323,7 +347,7 @@ def test_acquire_lock_raises_lock_not_held_error_when_server_reports_conflict(tm
         raise AssertionError(f"unexpected URL {request.full_url}")
 
     session = sync.SyncSession(
-        "100.72.137.92",
+        "https://api.example.test",
         "maspk_test",
         str(persistent),
         urlopen=fake_urlopen,
@@ -332,6 +356,62 @@ def test_acquire_lock_raises_lock_not_held_error_when_server_reports_conflict(tm
     assert issubclass(sync.core.UniSyncLockNotHeldError, sync.core.UniSyncError)
     with pytest.raises(sync.core.UniSyncLockNotHeldError):
         session.acquire_lock()
+
+
+def test_upload_raises_lock_not_held_error_when_server_reports_invalid_lease(tmp_path):
+    sync = load_client_module("mas_unisync_sync")
+    persistent = tmp_path / "persistent"
+    persistent.write_bytes(b"local")
+
+    def fake_urlopen(request, timeout):
+        if request.full_url.endswith("/v1/persistent/upload"):
+            raise HTTPError(
+                request.full_url,
+                409,
+                "Conflict",
+                hdrs=None,
+                fp=FakeResponse(409, {"detail": {"code": "invalid_lease"}}),
+            )
+        raise AssertionError(f"unexpected URL {request.full_url}")
+
+    session = sync.SyncSession(
+        "https://api.example.test",
+        "maspk_test",
+        str(persistent),
+        urlopen=fake_urlopen,
+    )
+    session.status.lease_token = "lease_expired"
+
+    with pytest.raises(sync.core.UniSyncLockNotHeldError):
+        session.upload_persistent()
+
+
+def test_heartbeat_raises_lock_not_held_error_when_server_reports_invalid_lease(tmp_path):
+    sync = load_client_module("mas_unisync_sync")
+    persistent = tmp_path / "persistent"
+    persistent.write_bytes(b"local")
+
+    def fake_urlopen(request, timeout):
+        if request.full_url.endswith("/v1/locks/heartbeat"):
+            raise HTTPError(
+                request.full_url,
+                409,
+                "Conflict",
+                hdrs=None,
+                fp=FakeResponse(409, {"detail": {"code": "invalid_lease"}}),
+            )
+        raise AssertionError(f"unexpected URL {request.full_url}")
+
+    session = sync.SyncSession(
+        "https://api.example.test",
+        "maspk_test",
+        str(persistent),
+        urlopen=fake_urlopen,
+    )
+    session.status.lease_token = "lease_expired"
+
+    with pytest.raises(sync.core.UniSyncLockNotHeldError):
+        session.heartbeat()
 
 
 def test_start_can_upload_local_persistent_when_remote_has_no_current_file(tmp_path):
@@ -358,14 +438,14 @@ def test_start_can_upload_local_persistent_when_remote_has_no_current_file(tmp_p
             return FakeResponse(201, {"sha256": "localhash", "created_at": "2026-01-01T00:00:00Z"})
         raise AssertionError(f"unexpected URL {request.full_url}")
 
-    session = sync.SyncSession("100.72.137.92", "maspk_test", str(persistent), urlopen=fake_urlopen)
+    session = sync.SyncSession("https://api.example.test", "maspk_test", str(persistent), urlopen=fake_urlopen)
     session.start(upload_after_sync=True)
 
     assert [request.full_url for request in requests] == [
-        "http://100.72.137.92:8000/v1/profile/resolve",
-        "http://100.72.137.92:8000/v1/locks/acquire",
-        "http://100.72.137.92:8000/v1/persistent/current",
-        "http://100.72.137.92:8000/v1/persistent/upload",
+        "https://api.example.test/v1/profile/resolve",
+        "https://api.example.test/v1/locks/acquire",
+        "https://api.example.test/v1/persistent/current",
+        "https://api.example.test/v1/persistent/upload",
     ]
     assert header(requests[3], "X-MAS-Lease-Token") == "lease_123"
     assert b'name="file"; filename="persistent"' in requests[3].data
@@ -398,15 +478,15 @@ def test_start_upload_after_sync_always_posts_even_when_hash_was_uploaded(tmp_pa
             return FakeResponse(201, {"sha256": local_hash, "created_at": "2026-01-01T00:00:00Z"})
         raise AssertionError(f"unexpected URL {request.full_url}")
 
-    session = sync.SyncSession("100.72.137.92", "maspk_test", str(persistent), urlopen=fake_urlopen)
+    session = sync.SyncSession("https://api.example.test", "maspk_test", str(persistent), urlopen=fake_urlopen)
     session.status.mark_upload_success(local_hash, "2025-01-01T00:00:00Z")
     session.start(upload_after_sync=True)
 
     assert [request.full_url for request in requests] == [
-        "http://100.72.137.92:8000/v1/profile/resolve",
-        "http://100.72.137.92:8000/v1/locks/acquire",
-        "http://100.72.137.92:8000/v1/persistent/current",
-        "http://100.72.137.92:8000/v1/persistent/upload",
+        "https://api.example.test/v1/profile/resolve",
+        "https://api.example.test/v1/locks/acquire",
+        "https://api.example.test/v1/persistent/current",
+        "https://api.example.test/v1/persistent/upload",
     ]
     assert header(requests[3], "X-MAS-Lease-Token") == "lease_123"
     assert b'name="file"; filename="persistent"' in requests[3].data
@@ -431,12 +511,12 @@ def test_sync_session_downloads_cloud_first_when_remote_hash_differs(tmp_path):
             return FakeResponse(200, body=b"cloud")
         raise AssertionError(f"unexpected URL {request.full_url}")
 
-    session = sync.SyncSession("100.72.137.92", "maspk_test", str(persistent), urlopen=fake_urlopen)
+    session = sync.SyncSession("https://api.example.test", "maspk_test", str(persistent), urlopen=fake_urlopen)
     session.start()
 
     assert persistent.read_bytes() == b"cloud"
     assert not (tmp_path / "backups").exists()
-    assert requests[-1].full_url == "http://100.72.137.92:8000/v1/persistent/download"
+    assert requests[-1].full_url == "https://api.example.test/v1/persistent/download"
     assert session.status.last_download_at
 
 
@@ -466,16 +546,16 @@ def test_start_can_load_remote_persistent_into_memory_without_replacing_local_fi
 
     monkeypatch.setattr(sync.core, "load_persistent_bytes_into_renpy", fake_load_persistent)
 
-    session = sync.SyncSession("100.72.137.92", "maspk_test", str(persistent), urlopen=fake_urlopen)
+    session = sync.SyncSession("https://api.example.test", "maspk_test", str(persistent), urlopen=fake_urlopen)
     session.start(load_remote_into_memory=True)
 
     assert loaded_bodies == [b"cloud"]
     assert persistent.read_bytes() == b"local"
     assert [request.full_url for request in requests] == [
-        "http://100.72.137.92:8000/v1/profile/resolve",
-        "http://100.72.137.92:8000/v1/locks/acquire",
-        "http://100.72.137.92:8000/v1/persistent/current",
-        "http://100.72.137.92:8000/v1/persistent/download",
+        "https://api.example.test/v1/profile/resolve",
+        "https://api.example.test/v1/locks/acquire",
+        "https://api.example.test/v1/persistent/current",
+        "https://api.example.test/v1/persistent/download",
     ]
     assert session.status.lock_state == "locked"
     assert session.status.last_local_hash == "remotehash"
@@ -506,18 +586,18 @@ def test_start_releases_lease_when_memory_load_fails(monkeypatch, tmp_path):
 
     monkeypatch.setattr(sync.core, "load_persistent_bytes_into_renpy", fail_load_persistent)
 
-    session = sync.SyncSession("100.72.137.92", "maspk_test", str(persistent), urlopen=fake_urlopen)
+    session = sync.SyncSession("https://api.example.test", "maspk_test", str(persistent), urlopen=fake_urlopen)
 
     with pytest.raises(ValueError, match="bad persistent"):
         session.start(load_remote_into_memory=True)
 
     assert persistent.read_bytes() == b"local"
     assert [request.full_url for request in requests] == [
-        "http://100.72.137.92:8000/v1/profile/resolve",
-        "http://100.72.137.92:8000/v1/locks/acquire",
-        "http://100.72.137.92:8000/v1/persistent/current",
-        "http://100.72.137.92:8000/v1/persistent/download",
-        "http://100.72.137.92:8000/v1/locks/release",
+        "https://api.example.test/v1/profile/resolve",
+        "https://api.example.test/v1/locks/acquire",
+        "https://api.example.test/v1/persistent/current",
+        "https://api.example.test/v1/persistent/download",
+        "https://api.example.test/v1/locks/release",
     ]
     assert session.status.lock_state == "released"
 
@@ -542,15 +622,15 @@ def test_start_upload_after_sync_uploads_even_after_downloading_remote_file(tmp_
             return FakeResponse(201, {"sha256": "remotehash", "created_at": "2026-01-01T00:00:00Z"})
         raise AssertionError(f"unexpected URL {request.full_url}")
 
-    session = sync.SyncSession("100.72.137.92", "maspk_test", str(persistent), urlopen=fake_urlopen)
+    session = sync.SyncSession("https://api.example.test", "maspk_test", str(persistent), urlopen=fake_urlopen)
     session.start(upload_after_sync=True)
 
     assert persistent.read_bytes() == b"cloud"
     assert [request.full_url for request in requests] == [
-        "http://100.72.137.92:8000/v1/profile/resolve",
-        "http://100.72.137.92:8000/v1/locks/acquire",
-        "http://100.72.137.92:8000/v1/persistent/current",
-        "http://100.72.137.92:8000/v1/persistent/download",
-        "http://100.72.137.92:8000/v1/persistent/upload",
+        "https://api.example.test/v1/profile/resolve",
+        "https://api.example.test/v1/locks/acquire",
+        "https://api.example.test/v1/persistent/current",
+        "https://api.example.test/v1/persistent/download",
+        "https://api.example.test/v1/persistent/upload",
     ]
     assert header(requests[4], "X-MAS-Lease-Token") == "lease_123"
