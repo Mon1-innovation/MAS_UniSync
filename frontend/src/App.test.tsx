@@ -421,7 +421,7 @@ describe('App', () => {
       if (input === '/account/profile-keys') {
         return json({items: []})
       }
-      if (input === '/admin/users') {
+      if (typeof input === 'string' && input.startsWith('/admin/users')) {
         return json({detail: {code: 'admin_required'}}, {status: 403})
       }
       return json({detail: {code: 'not_found'}}, {status: 404})
@@ -435,6 +435,91 @@ describe('App', () => {
 
     await expect(screen.findByText(/(does not have access to the admin area|没有权限访问管理区域)/i)).resolves.toBeInTheDocument()
     expect(screen.queryByRole('link', {name: /^admin$/i})).not.toBeInTheDocument()
+  })
+
+  it('requests paginated admin users and resets to page one when filters change', async () => {
+    localStorage.setItem('mas_unisync_user', JSON.stringify(adminUser))
+    mockFetch((input) => {
+      if (input === '/account/profile-keys') {
+        return json({items: []})
+      }
+      if (typeof input === 'string' && input.startsWith('/admin/users?')) {
+        return json({
+          items: [
+            {
+              ...normalUser,
+              profile_count: 1,
+              storage_usage: 12,
+              last_upload_at: '2026-02-05T10:00:00Z',
+              last_submod_use: null,
+              lock_status: 'none',
+              ban_status: 'none',
+            },
+          ],
+          page: input.includes('page=2') ? 2 : 1,
+          page_size: input.includes('page_size=50') ? 50 : 25,
+          has_next: !input.includes('page=2'),
+        })
+      }
+      return json({detail: {code: 'not_found'}}, {status: 404})
+    })
+
+    render(
+      <MemoryRouter initialEntries={['/admin/users']}>
+        <App />
+      </MemoryRouter>,
+    )
+
+    await expect(screen.findByText('Player')).resolves.toBeInTheDocument()
+    expectFetchCalled('/admin/users?page=1&page_size=25&sort=id&order=asc')
+
+    await userEvent.click(screen.getByRole('button', {name: /下一页/i}))
+    await waitFor(() => expectFetchCalled('/admin/users?page=2&page_size=25&sort=id&order=asc'))
+
+    await userEvent.selectOptions(screen.getByLabelText(/每页/i), '50')
+    await waitFor(() => expectFetchCalled('/admin/users?page=1&page_size=50&sort=id&order=asc'))
+
+    await userEvent.selectOptions(screen.getByLabelText(/排序字段/i), 'last_upload_at')
+    await waitFor(() => expectFetchCalled('/admin/users?page=1&page_size=50&sort=last_upload_at&order=asc'))
+
+    await userEvent.selectOptions(screen.getByLabelText(/排序方向/i), 'desc')
+    await waitFor(() => expectFetchCalled('/admin/users?page=1&page_size=50&sort=last_upload_at&order=desc'))
+
+    await userEvent.type(screen.getByLabelText(/上传开始/i), '2026-02-01')
+    await waitFor(() => {
+      expect(fetch).toHaveBeenCalledWith(
+        expect.stringContaining('last_upload_from=2026-02-01'),
+        expect.objectContaining({credentials: 'include'}),
+      )
+    })
+
+    await userEvent.type(screen.getByPlaceholderText(/搜索用户/i), 'guest')
+    await waitFor(() => {
+      expect(fetch).toHaveBeenCalledWith(expect.stringContaining('q=guest'), expect.objectContaining({credentials: 'include'}))
+    })
+  })
+
+  it('disables admin user pagination buttons from page and has_next', async () => {
+    localStorage.setItem('mas_unisync_user', JSON.stringify(adminUser))
+    mockFetch((input) => {
+      if (input === '/account/profile-keys') {
+        return json({items: []})
+      }
+      if (typeof input === 'string' && input.startsWith('/admin/users?')) {
+        return json({items: [], page: 1, page_size: 25, has_next: false})
+      }
+      return json({detail: {code: 'not_found'}}, {status: 404})
+    })
+
+    render(
+      <MemoryRouter initialEntries={['/admin/users']}>
+        <App />
+      </MemoryRouter>,
+    )
+
+    await expect(screen.findByText(/第 1 页/i)).resolves.toBeInTheDocument()
+    expect(screen.getByRole('button', {name: /上一页/i})).toBeDisabled()
+    expect(screen.getByRole('button', {name: /下一页/i})).toBeDisabled()
   })
 
   it('renders profiles on admin user detail and links to profile detail', async () => {
@@ -1139,7 +1224,7 @@ describe('App', () => {
       if (input === '/account/profile-keys') {
         return json({items: []})
       }
-      if (input === '/admin/audit-logs') {
+      if (typeof input === 'string' && input.startsWith('/admin/audit-logs')) {
         return json({
           items: [
             {
@@ -1155,6 +1240,9 @@ describe('App', () => {
               created_at: '2026-07-07T08:00:00',
             },
           ],
+          page: 1,
+          page_size: 25,
+          has_next: false,
         })
       }
       return json({detail: {code: 'not_found'}}, {status: 404})
@@ -1168,6 +1256,57 @@ describe('App', () => {
 
     const link = await screen.findByRole('link', {name: '#42'})
     expect(link).toHaveAttribute('href', '/admin/profiles/42')
+  })
+
+  it('requests paginated audit logs and resets page when search or page size changes', async () => {
+    localStorage.setItem('mas_unisync_user', JSON.stringify(adminUser))
+    mockFetch((input) => {
+      if (input === '/account/profile-keys') {
+        return json({items: []})
+      }
+      if (typeof input === 'string' && input.startsWith('/admin/audit-logs?')) {
+        return json({
+          items: [
+            {
+              id: 1,
+              actor_user_id: 1,
+              actor_role: 'admin',
+              action: 'admin.profile.ban',
+              target_user_id: 2,
+              target_profile_id: 42,
+              target_profile_key_id: 42,
+              ip_address: '127.0.0.1',
+              user_agent: 'test',
+              created_at: '2026-07-07T08:00:00',
+            },
+          ],
+          page: input.includes('page=2') ? 2 : 1,
+          page_size: input.includes('page_size=50') ? 50 : 25,
+          has_next: !input.includes('page=2'),
+        })
+      }
+      return json({detail: {code: 'not_found'}}, {status: 404})
+    })
+
+    render(
+      <MemoryRouter initialEntries={['/admin/audit-logs']}>
+        <App />
+      </MemoryRouter>,
+    )
+
+    await expect(screen.findByText('admin.profile.ban')).resolves.toBeInTheDocument()
+    expectFetchCalled('/admin/audit-logs?page=1&page_size=25')
+
+    await userEvent.click(screen.getByRole('button', {name: /下一页/i}))
+    await waitFor(() => expectFetchCalled('/admin/audit-logs?page=2&page_size=25'))
+
+    await userEvent.selectOptions(screen.getByLabelText(/每页/i), '50')
+    await waitFor(() => expectFetchCalled('/admin/audit-logs?page=1&page_size=50'))
+
+    await userEvent.type(screen.getByPlaceholderText(/筛选操作或目标/i), 'ban')
+    await waitFor(() => {
+      expect(fetch).toHaveBeenCalledWith(expect.stringContaining('q=ban'), expect.objectContaining({credentials: 'include'}))
+    })
   })
 
   it('allows admins to edit runtime system settings', async () => {

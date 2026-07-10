@@ -73,6 +73,28 @@ export interface AuditLog {
 
 export interface ListResponse<T> {
   items: T[]
+  page?: number
+  page_size?: number
+  has_next?: boolean
+}
+
+export type AdminUserSort = 'id' | 'last_upload_at'
+export type SortOrder = 'asc' | 'desc'
+
+export interface AdminUserListParams {
+  page: number
+  page_size: 25 | 50 | 100
+  q?: string
+  sort: AdminUserSort
+  order: SortOrder
+  last_upload_from?: string
+  last_upload_to?: string
+}
+
+export interface AuditLogListParams {
+  page: number
+  page_size: 25 | 50 | 100
+  q?: string
 }
 
 export interface LoginResponse {

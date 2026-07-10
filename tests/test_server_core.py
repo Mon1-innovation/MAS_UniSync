@@ -293,14 +293,103 @@ def test_import_guest_profile_reports_invalid_normal_claimed_and_quota_errors(cl
         assert quota_profile.user.role == "guest"
 
 
-def test_admin_user_list_excludes_temporary_guest_users(client):
-    new_guest_profile(client)
+def test_admin_user_list_includes_admin_normal_and_guest_users(client):
+    guest = new_guest_profile(client)
+    client.post("/logout")
+    login(client)
     login(client, "admin@example.com")
 
     users = client.get("/admin/users")
 
     assert users.status_code == 200
-    assert all(user["role"] != "guest" for user in users.json()["items"])
+    payload = users.json()
+    roles = {user["role"] for user in payload["items"]}
+    ids = {user["id"] for user in payload["items"]}
+    assert {"admin", "user", "guest"} <= roles
+    assert guest["user_id"] in ids
+    assert payload["page"] == 1
+    assert payload["page_size"] == 25
+    assert payload["has_next"] is False
+
+
+def test_admin_user_list_paginates_with_allowed_page_sizes_and_has_next(client):
+    login(client, "admin@example.com")
+    with client.app.state.SessionLocal() as db:
+        now = datetime(2026, 1, 1, tzinfo=timezone.utc)
+        for index in range(30):
+            db.add(
+                User(
+                    flarum_user_id=f"bulk:{index}",
+                    username=f"bulk-{index:02d}",
+                    display_name=f"Bulk {index:02d}",
+                    role="user",
+                    flarum_groups_json="[]",
+                    created_at=now,
+                    updated_at=now,
+                )
+            )
+        db.commit()
+
+    first = client.get("/admin/users?page=1&page_size=25")
+    second = client.get("/admin/users?page=2&page_size=25")
+    hundred = client.get("/admin/users?page_size=100")
+    invalid = client.get("/admin/users?page_size=26")
+
+    assert first.status_code == 200
+    assert len(first.json()["items"]) == 25
+    assert first.json()["has_next"] is True
+    assert second.status_code == 200
+    assert len(second.json()["items"]) == 6
+    assert second.json()["page"] == 2
+    assert second.json()["has_next"] is False
+    assert hundred.status_code == 200
+    assert hundred.json()["page_size"] == 100
+    assert invalid.status_code == 422
+
+
+def test_admin_user_list_search_sorts_and_filters_by_last_upload_window(client):
+    early_profile = new_profile(client)
+    early_key = early_profile["profile_key"]
+    early_lease = acquire_lock(client, early_key)
+    assert upload_persistent(
+        client,
+        early_key,
+        early_lease,
+        b"early",
+        now=datetime(2026, 1, 5, 10, 0, tzinfo=timezone.utc),
+    ).status_code == 201
+
+    client.post("/logout")
+    late_guest = new_guest_profile(client)
+    late_lease = acquire_lock(client, late_guest["profile_key"])
+    assert upload_persistent(
+        client,
+        late_guest["profile_key"],
+        late_lease,
+        b"late",
+        now=datetime(2026, 2, 5, 10, 0, tzinfo=timezone.utc),
+    ).status_code == 201
+
+    client.post("/logout")
+    login(client, "admin@example.com")
+
+    guest_search = client.get("/admin/users?q=guest")
+    id_desc = client.get("/admin/users?sort=id&order=desc")
+    upload_desc = client.get("/admin/users?sort=last_upload_at&order=desc")
+    upload_window = client.get(
+        "/admin/users"
+        "?last_upload_from=2026-02-01"
+        "&last_upload_to=2026-02-05"
+    )
+
+    assert guest_search.status_code == 200
+    assert any(user["role"] == "guest" for user in guest_search.json()["items"])
+    assert [user["id"] for user in id_desc.json()["items"]] == sorted(
+        [user["id"] for user in id_desc.json()["items"]],
+        reverse=True,
+    )
+    assert upload_desc.json()["items"][0]["id"] == late_guest["user_id"]
+    assert [user["id"] for user in upload_window.json()["items"]] == [late_guest["user_id"]]
 
 
 def test_flarum_login_imports_user_and_maps_admin_role(client):
@@ -741,6 +830,39 @@ def test_admin_actions_write_audit_logs_with_request_context(client):
     assert "admin.profile.ban" in actions
     assert "admin.lock.release" in actions
     assert any(entry["user_agent"] == "pytest-agent" for entry in logs)
+
+
+def test_admin_audit_logs_paginate_search_and_keep_fixed_desc_order(client):
+    login(client, "admin@example.com")
+    with client.app.state.SessionLocal() as db:
+        base = datetime(2026, 3, 1, 10, 0, tzinfo=timezone.utc)
+        for index in range(30):
+            db.add(
+                AuditLog(
+                    actor_role="admin",
+                    action=f"bulk.audit.{index:02d}",
+                    created_at=base + timedelta(minutes=index),
+                    target_user_id=index,
+                )
+            )
+        db.commit()
+
+    first = client.get("/admin/audit-logs?page=1&page_size=25")
+    second = client.get("/admin/audit-logs?page=2&page_size=25")
+    searched = client.get("/admin/audit-logs?q=bulk.audit.29")
+    invalid = client.get("/admin/audit-logs?page_size=200")
+
+    assert first.status_code == 200
+    assert len(first.json()["items"]) == 25
+    assert first.json()["has_next"] is True
+    first_ids = [entry["id"] for entry in first.json()["items"]]
+    assert first_ids == sorted(first_ids, reverse=True)
+    assert second.status_code == 200
+    assert len(second.json()["items"]) == 5
+    assert second.json()["page"] == 2
+    assert second.json()["has_next"] is False
+    assert [entry["action"] for entry in searched.json()["items"]] == ["bulk.audit.29"]
+    assert invalid.status_code == 422
 
 
 def test_admin_settings_default_from_origin_save_and_audit(client):

@@ -1,6 +1,6 @@
-import {Box, Text} from '@primer/react'
+import {Box, Button, Text} from '@primer/react'
 import {SearchIcon} from '@primer/octicons-react'
-import {useEffect, useMemo, useState} from 'react'
+import {useEffect, useState} from 'react'
 import {useTranslation} from 'react-i18next'
 import {Link} from 'react-router-dom'
 import {listAuditLogs} from '../../api/adminApi'
@@ -15,15 +15,21 @@ export function AdminAuditLogsPage() {
   const {t} = useTranslation()
   const [logs, setLogs] = useState<AuditLog[]>([])
   const [query, setQuery] = useState('')
+  const [page, setPage] = useState(1)
+  const [pageSize, setPageSize] = useState<25 | 50 | 100>(25)
+  const [hasNext, setHasNext] = useState(false)
   const [isLoading, setIsLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
 
   useEffect(() => {
     let cancelled = false
-    listAuditLogs()
+    setIsLoading(true)
+    setError(null)
+    listAuditLogs({page, page_size: pageSize, q: query.trim() || undefined})
       .then((response) => {
         if (!cancelled) {
           setLogs(response.items)
+          setHasNext(Boolean(response.has_next))
         }
       })
       .catch(() => {
@@ -39,18 +45,7 @@ export function AdminAuditLogsPage() {
     return () => {
       cancelled = true
     }
-  }, [t])
-
-  const filteredLogs = useMemo(() => {
-    const needle = query.trim().toLowerCase()
-    if (!needle) return logs
-    return logs.filter((log) =>
-      [log.action, log.target_user_id, log.target_profile_id, log.target_profile_key_id, log.actor_user_id]
-        .join(' ')
-        .toLowerCase()
-        .includes(needle),
-    )
-  }, [logs, query])
+  }, [page, pageSize, query, t])
 
   return (
     <Box className="page-stack">
@@ -64,17 +59,36 @@ export function AdminAuditLogsPage() {
           <input
             className="search-input"
             value={query}
-            onChange={(event) => setQuery(event.target.value)}
+            onChange={(event) => {
+              setQuery(event.target.value)
+              setPage(1)
+            }}
             placeholder={t('admin.auditLogs.filterPlaceholder')}
           />
         </Box>
       </Box>
+      <Box className="compact-tools">
+        <label className="field inline-field">
+          <span>{t('admin.pagination.pageSize')}</span>
+          <select
+            value={pageSize}
+            onChange={(event) => {
+              setPageSize(Number(event.target.value) as 25 | 50 | 100)
+              setPage(1)
+            }}
+          >
+            <option value={25}>25</option>
+            <option value={50}>50</option>
+            <option value={100}>100</option>
+          </select>
+        </label>
+      </Box>
       {error ? <ErrorBanner message={error} /> : null}
       {isLoading ? <LoadingState /> : null}
-      {!isLoading && filteredLogs.length === 0 ? (
+      {!isLoading && logs.length === 0 ? (
         <EmptyState title={t('admin.auditLogs.emptyTitle')} message={t('admin.auditLogs.emptyMessage')} />
       ) : null}
-      {filteredLogs.length > 0 ? (
+      {logs.length > 0 ? (
         <Box className="table-panel">
           <table>
             <thead>
@@ -88,7 +102,7 @@ export function AdminAuditLogsPage() {
               </tr>
             </thead>
             <tbody>
-              {filteredLogs.map((log) => (
+              {logs.map((log) => (
                 <tr key={log.id}>
                   <td>
                     <Text sx={{fontFamily: 'mono'}}>{log.action}</Text>
@@ -110,6 +124,32 @@ export function AdminAuditLogsPage() {
           </table>
         </Box>
       ) : null}
+      <PaginationControls page={page} hasNext={hasNext} onPrevious={() => setPage((value) => Math.max(1, value - 1))} onNext={() => setPage((value) => value + 1)} />
+    </Box>
+  )
+}
+
+function PaginationControls({
+  page,
+  hasNext,
+  onPrevious,
+  onNext,
+}: {
+  page: number
+  hasNext: boolean
+  onPrevious: () => void
+  onNext: () => void
+}) {
+  const {t} = useTranslation()
+  return (
+    <Box className="compact-tools" aria-label={t('admin.pagination.label')}>
+      <Button type="button" onClick={onPrevious} disabled={page === 1}>
+        {t('admin.pagination.previous')}
+      </Button>
+      <Text>{t('admin.pagination.page', {page})}</Text>
+      <Button type="button" onClick={onNext} disabled={!hasNext}>
+        {t('admin.pagination.next')}
+      </Button>
     </Box>
   )
 }

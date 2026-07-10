@@ -1,7 +1,9 @@
 import {downloadBlob, request} from './client'
 import type {
   AdminUserListItem,
+  AdminUserListParams,
   AuditLog,
+  AuditLogListParams,
   Backup,
   ListResponse,
   Profile,
@@ -15,8 +17,8 @@ import type {
   Version,
 } from './types'
 
-export function listAdminUsers() {
-  return request<ListResponse<AdminUserListItem>>('/admin/users')
+export function listAdminUsers(params: AdminUserListParams) {
+  return request<ListResponse<AdminUserListItem>>(`/admin/users?${queryString(params)}`)
 }
 
 export function getAdminUser(userId: number) {
@@ -92,8 +94,8 @@ export function downloadBackupPersistent(profileId: number, backupId: number) {
   return downloadBlob(`/admin/profiles/${profileId}/persistent/backups/${backupId}/download`)
 }
 
-export function listAuditLogs() {
-  return request<ListResponse<AuditLog>>('/admin/audit-logs')
+export function listAuditLogs(params: AuditLogListParams) {
+  return request<ListResponse<AuditLog>>(`/admin/audit-logs?${queryString(params)}`)
 }
 
 export function getAdminSettings() {
@@ -144,4 +146,18 @@ function storageBucketRequestBody(bucket: StorageBucket) {
             path: bucket.config.path ?? '',
           },
   }
+}
+
+type QueryStringParams<T extends object> = {
+  [K in keyof T]: string | number | undefined
+}
+
+function queryString<T extends object>(params: QueryStringParams<T>) {
+  const query = new URLSearchParams()
+  for (const [key, value] of Object.entries(params)) {
+    if (value !== undefined && value !== '') {
+      query.append(key, String(value))
+    }
+  }
+  return query.toString()
 }

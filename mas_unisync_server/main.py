@@ -2,12 +2,12 @@ from __future__ import annotations
 
 import asyncio
 from contextlib import asynccontextmanager, suppress
-from datetime import timedelta
+from datetime import date, datetime, time, timedelta
 import secrets
 
-from fastapi import BackgroundTasks, Depends, FastAPI, File, Form, Header, HTTPException, Request, Response, UploadFile
+from fastapi import BackgroundTasks, Depends, FastAPI, File, Form, Header, HTTPException, Query, Request, Response, UploadFile
 from fastapi.responses import StreamingResponse
-from sqlalchemy import desc, func, inspect, or_, select, text
+from sqlalchemy import String, cast, desc, func, inspect, or_, select, text
 from sqlalchemy.orm import Session
 from starlette.middleware.sessions import SessionMiddleware
 
@@ -609,11 +609,78 @@ def create_app(settings: Settings | None = None, flarum_client=None) -> FastAPI:
             payload["last_submod_use"] = payload["last_submod_use"].isoformat()
         return payload
 
+    def pagination(page: int, page_size: int) -> tuple[int, int]:
+        if page < 1 or page_size not in {25, 50, 100}:
+            raise HTTPException(status_code=422, detail={"code": "invalid_pagination"})
+        return page_size, (page - 1) * page_size
+
+    def paged_response(items: list, page: int, page_size: int, has_next: bool) -> dict:
+        return {
+            "items": items,
+            "page": page,
+            "page_size": page_size,
+            "has_next": has_next,
+        }
+
+    def search_term(q: str | None) -> str | None:
+        value = (q or "").strip()[:100]
+        return value or None
+
+    def parse_datetime_filter(value: str | None, *, end_of_day: bool = False) -> datetime | None:
+        if not value:
+            return None
+        try:
+            if len(value) == 10:
+                parsed_date = date.fromisoformat(value)
+                return datetime.combine(parsed_date, time.max if end_of_day else time.min)
+            return datetime.fromisoformat(value.replace("Z", "+00:00"))
+        except ValueError as exc:
+            raise HTTPException(status_code=422, detail={"code": "invalid_datetime_filter"}) from exc
+
     @app.get("/admin/users")
-    def admin_users(request: Request, _: User = Depends(admin_user), db: Session = Depends(get_db)):
+    def admin_users(
+        request: Request,
+        page: int = Query(default=1),
+        page_size: int = Query(default=25),
+        q: str | None = None,
+        sort: str = "id",
+        order: str = "asc",
+        last_upload_from: str | None = None,
+        last_upload_to: str | None = None,
+        _: User = Depends(admin_user),
+        db: Session = Depends(get_db),
+    ):
+        if sort not in {"id", "last_upload_at"} or order not in {"asc", "desc"}:
+            raise HTTPException(status_code=422, detail={"code": "invalid_sort"})
+        limit, offset = pagination(page, page_size)
         now = request_now(request)
-        users = list(db.scalars(select(User).where(User.role != "guest").order_by(User.id)))
-        return {"items": [user_list_item(db, user, now) for user in users]}
+        upload_from = parse_datetime_filter(last_upload_from)
+        upload_to = parse_datetime_filter(last_upload_to, end_of_day=True)
+        last_upload = func.max(Profile.last_upload_at)
+        stmt = select(User, last_upload.label("last_upload_at")).outerjoin(Profile, Profile.user_id == User.id).group_by(User.id)
+        term = search_term(q)
+        if term:
+            pattern = f"%{term}%"
+            stmt = stmt.where(
+                or_(
+                    User.username.ilike(pattern),
+                    User.display_name.ilike(pattern),
+                    cast(User.flarum_user_id, String).ilike(pattern),
+                    User.role.ilike(pattern),
+                )
+            )
+        if upload_from is not None:
+            stmt = stmt.having(last_upload >= upload_from)
+        if upload_to is not None:
+            stmt = stmt.having(last_upload <= upload_to)
+        if sort == "last_upload_at":
+            sort_expr = last_upload
+        else:
+            sort_expr = User.id
+        stmt = stmt.order_by(sort_expr.desc() if order == "desc" else sort_expr.asc(), User.id.asc()).offset(offset).limit(limit + 1)
+        rows = db.execute(stmt).all()
+        users = [row[0] for row in rows[:limit]]
+        return paged_response([user_list_item(db, user, now) for user in users], page, page_size, len(rows) > limit)
 
     @app.get("/admin/settings")
     def admin_get_settings(request: Request, _: User = Depends(admin_user), db: Session = Depends(get_db)):
@@ -878,10 +945,33 @@ def create_app(settings: Settings | None = None, flarum_client=None) -> FastAPI:
         return Response(status_code=204)
 
     @app.get("/admin/audit-logs")
-    def admin_audit_logs(_: User = Depends(admin_user), db: Session = Depends(get_db)):
-        logs = list(db.scalars(select(AuditLog).order_by(desc(AuditLog.created_at), desc(AuditLog.id)).limit(200)))
-        return {
-            "items": [
+    def admin_audit_logs(
+        page: int = Query(default=1),
+        page_size: int = Query(default=25),
+        q: str | None = None,
+        _: User = Depends(admin_user),
+        db: Session = Depends(get_db),
+    ):
+        limit, offset = pagination(page, page_size)
+        stmt = select(AuditLog)
+        term = search_term(q)
+        if term:
+            pattern = f"%{term}%"
+            stmt = stmt.where(
+                or_(
+                    AuditLog.action.ilike(pattern),
+                    AuditLog.actor_role.ilike(pattern),
+                    cast(AuditLog.actor_user_id, String).ilike(pattern),
+                    cast(AuditLog.target_user_id, String).ilike(pattern),
+                    cast(AuditLog.target_profile_id, String).ilike(pattern),
+                    cast(AuditLog.target_profile_key_id, String).ilike(pattern),
+                    AuditLog.ip_address.ilike(pattern),
+                    AuditLog.user_agent.ilike(pattern),
+                )
+            )
+        logs = list(db.scalars(stmt.order_by(desc(AuditLog.created_at), desc(AuditLog.id)).offset(offset).limit(limit + 1)))
+        return paged_response(
+            [
                 {
                     "id": log.id,
                     "actor_user_id": log.actor_user_id,
@@ -894,9 +984,12 @@ def create_app(settings: Settings | None = None, flarum_client=None) -> FastAPI:
                     "user_agent": log.user_agent,
                     "created_at": log.created_at.isoformat(),
                 }
-                for log in logs
-            ]
-        }
+                for log in logs[:limit]
+            ],
+            page,
+            page_size,
+            len(logs) > limit,
+        )
 
 
     return app
