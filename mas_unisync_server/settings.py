@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import os
 import re
+from ipaddress import ip_network
 from pathlib import Path
 from urllib.parse import quote
 
@@ -24,6 +25,7 @@ class Settings(BaseModel):
     flarum_url: str = "https://forum.example"
     admin_flarum_group_ids: set[str] = Field(default_factory=set)
     admin_flarum_group_names: set[str] = Field(default_factory=set)
+    trusted_proxy_ips: set[str] = Field(default_factory=set)
     lock_ttl_seconds: int = 60
 
 
@@ -31,6 +33,16 @@ def parse_csv_set(value: str | None) -> set[str]:
     if not value:
         return set()
     return {item.strip() for item in re.split(r"[,，;；]", value) if item.strip()}
+
+
+def parse_trusted_proxy_ips(value: str | None) -> set[str]:
+    trusted_proxy_ips = parse_csv_set(value)
+    for item in trusted_proxy_ips:
+        try:
+            ip_network(item, strict=False)
+        except ValueError as exc:
+            raise ValueError(f"TRUSTED_PROXY_IPS contains invalid IP or CIDR: {item}") from exc
+    return trusted_proxy_ips
 
 
 def _normalize_environment(value: str | None) -> str:
@@ -85,5 +97,6 @@ def build_settings() -> Settings:
         flarum_url=os.getenv("FLARUM_URL", "https://forum.example"),
         admin_flarum_group_ids=parse_csv_set(os.getenv("ADMIN_FLARUM_GROUP_IDS")),
         admin_flarum_group_names=parse_csv_set(os.getenv("ADMIN_FLARUM_GROUP_NAMES")),
+        trusted_proxy_ips=parse_trusted_proxy_ips(os.getenv("TRUSTED_PROXY_IPS")),
         lock_ttl_seconds=int(os.getenv("LOCK_TTL_SECONDS", "60")),
     )

@@ -5,6 +5,7 @@ import json
 import secrets
 import base64
 from datetime import date, datetime, timedelta, timezone
+from ipaddress import ip_address, ip_network
 from pathlib import Path
 
 import httpx
@@ -172,6 +173,45 @@ def upsert_flarum_user(db: Session, profile: dict, settings: Settings, now: date
     return user
 
 
+def direct_client_host(request: Request) -> str | None:
+    return request.client.host if request.client else None
+
+
+def trusted_proxy_matches(client_host: str | None, trusted_proxy_ips: set[str]) -> bool:
+    if not client_host or not trusted_proxy_ips:
+        return False
+    try:
+        client_ip = ip_address(client_host)
+    except ValueError:
+        return False
+
+    for trusted_proxy in trusted_proxy_ips:
+        trusted_network = ip_network(trusted_proxy, strict=False)
+        if client_ip.version == trusted_network.version and client_ip in trusted_network:
+            return True
+    return False
+
+
+def first_x_forwarded_for_ip(request: Request) -> str | None:
+    for value in request.headers.get("X-Forwarded-For", "").split(","):
+        candidate = value.strip()
+        if not candidate:
+            continue
+        try:
+            ip_address(candidate)
+        except ValueError:
+            continue
+        return candidate
+    return None
+
+
+def audit_ip_address(request: Request, settings: Settings) -> str | None:
+    client_host = direct_client_host(request)
+    if trusted_proxy_matches(client_host, settings.trusted_proxy_ips):
+        return first_x_forwarded_for_ip(request) or client_host
+    return client_host
+
+
 def audit(
     db: Session,
     request: Request,
@@ -190,7 +230,7 @@ def audit(
             target_user_id=target_user_id,
             target_profile_id=target_profile_id,
             target_profile_key_id=target_profile_key_id,
-            ip_address=request.client.host if request.client else None,
+            ip_address=audit_ip_address(request, request.app.state.settings),
             user_agent=request.headers.get("User-Agent"),
             created_at=request_now(request),
         )

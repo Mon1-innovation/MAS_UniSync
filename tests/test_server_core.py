@@ -68,6 +68,22 @@ def client(tmp_path):
         yield test_client
 
 
+def make_client(tmp_path, *, trusted_proxy_ips: set[str] | None = None, client_host: str = "127.0.0.1"):
+    settings = Settings(
+        database_url=f"sqlite:///{tmp_path / 'server.db'}",
+        object_storage_path=tmp_path / "objects",
+        session_secret="test-secret",
+        admin_flarum_group_ids={"1"},
+        admin_flarum_group_names={"Admin"},
+        lock_ttl_seconds=60,
+        trusted_proxy_ips=trusted_proxy_ips or set(),
+    )
+    return TestClient(
+        create_app(settings=settings, flarum_client=FakeFlarumClient()),
+        client=(client_host, 50000),
+    )
+
+
 def login(client: TestClient, identification: str = "user@example.com", password: str = "secret"):
     response = client.post(
         "/login/flarum",
@@ -610,6 +626,54 @@ def test_admin_settings_default_from_origin_save_and_audit(client):
     logs = client.get("/admin/audit-logs").json()["items"]
     settings_log = next(entry for entry in logs if entry["action"] == "admin.settings.update")
     assert settings_log["user_agent"] == "settings-agent"
+
+
+def write_settings_audit_log(client: TestClient, *, x_forwarded_for: str | None = None):
+    login(client, "admin@example.com")
+    headers = {}
+    if x_forwarded_for is not None:
+        headers["X-Forwarded-For"] = x_forwarded_for
+    response = client.put(
+        "/admin/settings",
+        json={
+            "backend_api_url": "https://api.example.test/base/",
+            "frontend_web_url": "https://portal.example.test",
+            "profile_storage_limit_bytes": 12345,
+            "max_active_profiles_per_account": 7,
+        },
+        headers=headers,
+    )
+    assert response.status_code == 200
+    logs = client.get("/admin/audit-logs").json()["items"]
+    return next(entry for entry in logs if entry["action"] == "admin.settings.update")
+
+
+def test_audit_log_uses_x_forwarded_for_from_trusted_proxy(tmp_path):
+    with make_client(tmp_path, trusted_proxy_ips={"127.0.0.1"}) as client:
+        settings_log = write_settings_audit_log(client, x_forwarded_for="203.0.113.10")
+
+    assert settings_log["ip_address"] == "203.0.113.10"
+
+
+def test_audit_log_uses_first_x_forwarded_for_address_from_trusted_proxy(tmp_path):
+    with make_client(tmp_path, trusted_proxy_ips={"127.0.0.0/24"}) as client:
+        settings_log = write_settings_audit_log(client, x_forwarded_for="203.0.113.10, 10.0.0.1")
+
+    assert settings_log["ip_address"] == "203.0.113.10"
+
+
+def test_audit_log_ignores_x_forwarded_for_from_untrusted_client(tmp_path):
+    with make_client(tmp_path, trusted_proxy_ips={"10.0.0.0/8"}, client_host="198.51.100.25") as client:
+        settings_log = write_settings_audit_log(client, x_forwarded_for="203.0.113.10")
+
+    assert settings_log["ip_address"] == "198.51.100.25"
+
+
+def test_audit_log_falls_back_to_direct_client_without_x_forwarded_for(tmp_path):
+    with make_client(tmp_path, trusted_proxy_ips={"127.0.0.1"}) as client:
+        settings_log = write_settings_audit_log(client)
+
+    assert settings_log["ip_address"] == "127.0.0.1"
 
 
 def test_admin_settings_reject_non_admin_and_invalid_values(client):

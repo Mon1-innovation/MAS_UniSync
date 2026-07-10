@@ -42,3 +42,18 @@ def test_build_settings_requires_postgres_configuration_in_production(monkeypatc
 
     with pytest.raises(ValueError, match="POSTGRES_PASSWORD"):
         build_settings()
+
+
+def test_build_settings_reads_trusted_proxy_ips(monkeypatch):
+    monkeypatch.setenv("TRUSTED_PROXY_IPS", "127.0.0.1,10.0.0.0/8,172.16.0.0/12")
+
+    settings = build_settings()
+
+    assert settings.trusted_proxy_ips == {"127.0.0.1", "10.0.0.0/8", "172.16.0.0/12"}
+
+
+def test_build_settings_rejects_invalid_trusted_proxy_ips(monkeypatch):
+    monkeypatch.setenv("TRUSTED_PROXY_IPS", "127.0.0.1,not-an-ip")
+
+    with pytest.raises(ValueError, match="TRUSTED_PROXY_IPS contains invalid IP or CIDR: not-an-ip"):
+        build_settings()
