@@ -152,6 +152,39 @@ input:focus-visible {
   gap: 2px;
 }
 
+.github-project-link {
+  width: 34px;
+  height: 34px;
+  display: inline-grid;
+  place-items: center;
+  flex: 0 0 auto;
+  color: #f6f8fa;
+  background: rgba(255, 255, 255, 0.08);
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  border-radius: 8px;
+}
+
+.github-project-link:hover {
+  color: #fff;
+  background: rgba(255, 255, 255, 0.15);
+  border-color: rgba(255, 255, 255, 0.28);
+  box-shadow: 0 7px 18px rgba(31, 35, 40, 0.14);
+}
+
+.github-project-link:focus-visible {
+  outline: 2px solid #7cc9ff;
+  outline-offset: 2px;
+  box-shadow: 0 0 0 3px rgba(124, 201, 255, 0.2);
+}
+
+.github-project-link svg {
+  transition: transform 140ms ease;
+}
+
+.github-project-link:hover svg {
+  transform: translateY(-1px);
+}
+
 .help-heading {
   display: inline-flex;
   align-items: center;

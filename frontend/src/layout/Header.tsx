@@ -2,6 +2,7 @@ import {Button, Box, Text, Avatar} from '@primer/react'
 import {DatabaseIcon, SignOutIcon} from '@primer/octicons-react'
 import {useTranslation} from 'react-i18next'
 import {useAuth} from '../auth/AuthProvider'
+import {GitHubProjectLink} from '../components/GitHubProjectLink'
 import {LanguageSwitcher} from '../components/LanguageSwitcher'
 
 export function Header() {
@@ -23,6 +24,7 @@ export function Header() {
         </Box>
         {user ? (
           <Box className="header-user">
+            <GitHubProjectLink />
             <LanguageSwitcher />
             {user.avatar_url ? (
               <Avatar src={user.avatar_url} alt={name} size={24} />

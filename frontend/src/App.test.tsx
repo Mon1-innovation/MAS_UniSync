@@ -34,6 +34,8 @@ const guestUser: User = {
   role: 'guest',
 }
 
+const githubRepositoryUrl = 'https://github.com/Mon1-innovation/MAS_UniSync'
+
 function mockFetch(handler: (input: RequestInfo | URL, init?: RequestInit) => Response | Promise<Response>) {
   globalThis.fetch = vi.fn((input: RequestInfo | URL, init?: RequestInit) => Promise.resolve(handler(input, init)))
 }
@@ -78,6 +80,19 @@ describe('App', () => {
     )
 
     expect(await screen.findByRole('button', {name: '登录'})).toBeInTheDocument()
+  })
+
+  it('does not show the GitHub repository link on the login page', async () => {
+    mockFetch(() => json({detail: {code: 'not_found'}}, {status: 404}))
+
+    render(
+      <MemoryRouter initialEntries={['/login']}>
+        <App />
+      </MemoryRouter>,
+    )
+
+    await screen.findByRole('button', {name: '登录'})
+    expect(screen.queryByRole('link', {name: 'GitHub repository'})).not.toBeInTheDocument()
   })
 
   it('switches to English and persists the language choice', async () => {
@@ -194,6 +209,28 @@ describe('App', () => {
     expect(screen.queryByRole('button', {name: /刷新.*Key/i})).not.toBeInTheDocument()
     expect(screen.queryByRole('button', {name: /删除.*Key/i})).not.toBeInTheDocument()
     expect(screen.getByRole('button', {name: /查看文件/i})).toBeInTheDocument()
+  })
+
+  it('shows the GitHub repository link in the authenticated header', async () => {
+    localStorage.setItem('mas_unisync_user', JSON.stringify(normalUser))
+    mockFetch((input) => {
+      if (input === '/account/profile-keys') {
+        return json({items: []})
+      }
+      return json({detail: {code: 'not_found'}}, {status: 404})
+    })
+
+    render(
+      <MemoryRouter initialEntries={['/account/profile-keys']}>
+        <App />
+      </MemoryRouter>,
+    )
+
+    await screen.findByRole('heading', {level: 1, name: /Profile Key/i})
+    const repositoryLink = screen.getByRole('link', {name: 'GitHub repository'})
+    expect(repositoryLink).toHaveAttribute('href', githubRepositoryUrl)
+    expect(repositoryLink).toHaveAttribute('target', '_blank')
+    expect(repositoryLink).toHaveAttribute('rel', 'noreferrer')
   })
 
   it('imports a guest key into a Flarum account', async () => {
