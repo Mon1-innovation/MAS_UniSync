@@ -1,4 +1,4 @@
-import {downloadBlob, request} from './client'
+import {downloadBlob, downloadBlobWithFilename, request} from './client'
 import type {Backup, ListResponse, Profile, ProfileResponse, PublicWebConfig, Version} from './types'
 
 export function listProfileKeys() {
@@ -64,4 +64,8 @@ export function downloadAccountBackupPersistent(profileId: number, backupId: num
 
 export function restoreAccountBackup(profileId: number, backupId: number) {
   return request<Version>(`/account/profiles/${profileId}/persistent/backups/${backupId}/restore`, {method: 'POST'})
+}
+
+export function downloadLatestClientRelease() {
+  return downloadBlobWithFilename('/account/client-release/latest/download')
 }

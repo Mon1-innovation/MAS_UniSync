@@ -5,7 +5,7 @@ init -990 python:
     import pygame
     import json
 
-    mas_unisync_version = "0.1.0"
+    mas_unisync_version = "1.0.0"
 
     mas_unisync_dir = os.path.join(renpy.config.gamedir, "Submods", "MAS_UniSync")
 

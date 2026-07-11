@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from dataclasses import dataclass
 import hashlib
 import json
 import logging
@@ -73,7 +74,17 @@ SETTING_GUEST_KEY_RETENTION_DAYS = "guest_key_retention_days"
 SUPPORTED_STORAGE_BUCKET_TYPES = {"local", "webdav"}
 DEFAULT_LOCAL_BUCKET_NAME = "Docker local storage"
 ENCRYPTED_STORAGE_PASSWORD_PREFIX = "fernet:"
+GITHUB_LATEST_RELEASE_URL = "https://api.github.com/repos/Mon1-innovation/MAS_UniSync/releases/latest"
+CLIENT_RELEASE_ASSET_PREFIX = "MAS_UniSync-"
+CLIENT_RELEASE_ASSET_SUFFIX = ".zip"
+CLIENT_RELEASE_HTTP_TIMEOUT_SECONDS = 30.0
 logger = logging.getLogger(__name__)
+
+
+@dataclass(frozen=True)
+class CachedClientRelease:
+    path: Path
+    filename: str
 
 
 def storage_secret_fernet(settings: Settings) -> Fernet:
@@ -105,6 +116,111 @@ def sanitize_version(value: str | None) -> str | None:
     if stripped.startswith('<') and stripped.endswith('>'):
         return None
     return stripped or None
+
+
+def cache_latest_client_release(settings: Settings) -> CachedClientRelease:
+    asset = latest_client_release_asset()
+    cache_dir = settings.client_release_cache_path
+    cache_dir.mkdir(parents=True, exist_ok=True)
+    archive_path = cache_dir / asset["name"]
+    metadata_path = cache_dir / f"{asset['name']}.json"
+    if client_release_cache_is_current(archive_path, metadata_path, asset):
+        return CachedClientRelease(path=archive_path, filename=asset["name"])
+
+    try:
+        response = httpx.get(
+            asset["download_url"],
+            headers=github_headers(),
+            follow_redirects=True,
+            timeout=CLIENT_RELEASE_HTTP_TIMEOUT_SECONDS,
+        )
+        response.raise_for_status()
+    except httpx.HTTPError as exc:
+        raise HTTPException(status_code=502, detail={"code": "client_release_download_failed"}) from exc
+
+    content = response.content
+    if asset["size"] is not None and len(content) != asset["size"]:
+        raise HTTPException(status_code=502, detail={"code": "client_release_size_mismatch"})
+
+    temp_path = archive_path.with_name(f"{archive_path.name}.tmp")
+    temp_path.write_bytes(content)
+    temp_path.replace(archive_path)
+    metadata_path.write_text(json.dumps(client_release_metadata(asset), ensure_ascii=False, indent=2), encoding="utf-8")
+    return CachedClientRelease(path=archive_path, filename=asset["name"])
+
+
+def latest_client_release_asset() -> dict:
+    try:
+        response = httpx.get(
+            GITHUB_LATEST_RELEASE_URL,
+            headers=github_headers(),
+            timeout=CLIENT_RELEASE_HTTP_TIMEOUT_SECONDS,
+        )
+        response.raise_for_status()
+    except httpx.HTTPError as exc:
+        raise HTTPException(status_code=502, detail={"code": "client_release_lookup_failed"}) from exc
+
+    payload = response.json()
+    assets = payload.get("assets") if isinstance(payload, dict) else None
+    if not isinstance(assets, list):
+        raise HTTPException(status_code=502, detail={"code": "client_release_asset_not_found"})
+    for asset in assets:
+        normalized = normalize_client_release_asset(asset, payload.get("tag_name"))
+        if normalized is not None:
+            return normalized
+    raise HTTPException(status_code=502, detail={"code": "client_release_asset_not_found"})
+
+
+def normalize_client_release_asset(asset: object, tag_name: object) -> dict | None:
+    if not isinstance(asset, dict):
+        return None
+    name = asset.get("name")
+    download_url = asset.get("browser_download_url")
+    if not isinstance(name, str) or not isinstance(download_url, str):
+        return None
+    if not name.startswith(CLIENT_RELEASE_ASSET_PREFIX) or not name.endswith(CLIENT_RELEASE_ASSET_SUFFIX):
+        return None
+    if Path(name).name != name:
+        return None
+    size = asset.get("size")
+    asset_id = asset.get("id")
+    return {
+        "id": asset_id if isinstance(asset_id, int) else None,
+        "name": name,
+        "size": size if isinstance(size, int) and size >= 0 else None,
+        "tag_name": tag_name if isinstance(tag_name, str) else "",
+        "download_url": download_url,
+    }
+
+
+def client_release_cache_is_current(archive_path: Path, metadata_path: Path, asset: dict) -> bool:
+    if not archive_path.is_file() or not metadata_path.is_file():
+        return False
+    try:
+        metadata = json.loads(metadata_path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return False
+    expected = client_release_metadata(asset)
+    if metadata != expected:
+        return False
+    return asset["size"] is None or archive_path.stat().st_size == asset["size"]
+
+
+def client_release_metadata(asset: dict) -> dict:
+    return {
+        "id": asset["id"],
+        "name": asset["name"],
+        "size": asset["size"],
+        "tag_name": asset["tag_name"],
+        "download_url": asset["download_url"],
+    }
+
+
+def github_headers() -> dict[str, str]:
+    return {
+        "Accept": "application/vnd.github+json",
+        "User-Agent": "MAS-UniSync",
+    }
 
 
 def user_payload(user: User) -> dict:

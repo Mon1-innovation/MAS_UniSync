@@ -43,6 +43,17 @@ export async function downloadBlob(path: string): Promise<Blob> {
   return response.blob()
 }
 
+export async function downloadBlobWithFilename(path: string): Promise<{blob: Blob; filename: string | null}> {
+  const response = await fetch(path, {credentials: 'include'})
+  if (!response.ok) {
+    throw new ApiError(response.status, await parseResponseBody(response))
+  }
+  return {
+    blob: await response.blob(),
+    filename: extractFilename(response.headers.get('Content-Disposition')),
+  }
+}
+
 function buildRequestInit(options: RequestOptions): RequestInit {
   const headers = {...options.headers}
   let body = options.body as BodyInit | null | undefined
@@ -93,4 +104,13 @@ function extractErrorCode(detail: unknown): string | undefined {
     return typeof code === 'string' ? code : undefined
   }
   return undefined
+}
+
+function extractFilename(contentDisposition: string | null): string | null {
+  if (!contentDisposition) {
+    return null
+  }
+  const match = /filename\*=(?:UTF-8'')?[^']*'?([^;]+)|filename="?([^";]+)"?/i.exec(contentDisposition)
+  const encoded = match?.[1] || match?.[2]
+  return encoded ? decodeURIComponent(encoded.trim()) : null
 }

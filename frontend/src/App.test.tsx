@@ -208,6 +208,7 @@ describe('App', () => {
     expect(screen.queryByRole('button', {name: /导入游客 Key/i})).not.toBeInTheDocument()
     expect(screen.queryByRole('button', {name: /刷新.*Key/i})).not.toBeInTheDocument()
     expect(screen.queryByRole('button', {name: /删除.*Key/i})).not.toBeInTheDocument()
+    expect(screen.getByRole('button', {name: /下载客户端/i})).toBeInTheDocument()
     expect(screen.getByRole('button', {name: /查看文件/i})).toBeInTheDocument()
   })
 
@@ -516,6 +517,46 @@ describe('App', () => {
     await userEvent.hover(screen.getByRole('button', {name: 'Backend API URL 说明'}))
     expect(screen.getByText('将这个链接填写至你的 API Key 界面的 MAS UniSync API URL。')).toBeInTheDocument()
     expect(screen.getByText('https://api.example.test')).toBeInTheDocument()
+  })
+
+  it('offers GitHub releases and cached client downloads on the profile keys page', async () => {
+    localStorage.setItem('mas_unisync_user', JSON.stringify(normalUser))
+    Object.defineProperty(URL, 'createObjectURL', {
+      configurable: true,
+      value: vi.fn(() => 'blob:client-release'),
+    })
+    Object.defineProperty(URL, 'revokeObjectURL', {
+      configurable: true,
+      value: vi.fn(),
+    })
+    const anchorClick = vi.spyOn(HTMLAnchorElement.prototype, 'click').mockImplementation(() => undefined)
+    const open = vi.spyOn(window, 'open').mockImplementation(() => null)
+    mockFetch((input) => {
+      if (input === '/account/profile-keys') {
+        return json({items: []})
+      }
+      if (input === '/account/client-release/latest/download') {
+        return blob('client-zip')
+      }
+      return json({detail: {code: 'not_found'}}, {status: 404})
+    })
+
+    render(
+      <MemoryRouter initialEntries={['/account/profile-keys']}>
+        <App />
+      </MemoryRouter>,
+    )
+
+    await userEvent.click(await screen.findByRole('button', {name: /下载客户端/i}))
+    const dialog = screen.getByRole('dialog', {name: /下载客户端/i})
+
+    await userEvent.click(within(dialog).getByRole('button', {name: /访问 GitHub Releases/i}))
+    expect(open).toHaveBeenCalledWith('https://github.com/Mon1-innovation/MAS_UniSync/releases', '_blank', 'noreferrer')
+
+    await userEvent.click(within(dialog).getByRole('button', {name: /通过本机缓存下载/i}))
+    await waitFor(() => expectFetchCalled('/account/client-release/latest/download'))
+    expect(URL.createObjectURL).toHaveBeenCalled()
+    expect(anchorClick).toHaveBeenCalled()
   })
 
   it('renders access denied when the admin API returns 403', async () => {

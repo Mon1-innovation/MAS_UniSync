@@ -130,6 +130,7 @@ http://127.0.0.1:5173
 | `POSTGRES_USER` | Docker Compose PostgreSQL 用户名。 |
 | `POSTGRES_PASSWORD` | Docker Compose PostgreSQL 密码。生产部署必填。 |
 | `OBJECT_STORAGE_PATH` | persistent 文件存储目录。 |
+| `CLIENT_RELEASE_CACHE_PATH` | 服务端缓存 GitHub 最新客户端发布包的目录。 |
 | `SESSION_SECRET` | Web 会话密钥。生产部署必须替换。 |
 | `FLARUM_URL` | Flarum 论坛地址。 |
 | `ADMIN_FLARUM_GROUP_IDS` | 映射为管理员的 Flarum group id。 |

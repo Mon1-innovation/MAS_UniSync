@@ -1,10 +1,10 @@
 import {Box, Button, Text} from '@primer/react'
-import {FileDirectoryIcon, KeyIcon, PencilIcon, PlusIcon, QuestionIcon, SyncIcon, TrashIcon} from '@primer/octicons-react'
+import {DownloadIcon, FileDirectoryIcon, KeyIcon, MarkGithubIcon, PencilIcon, PlusIcon, QuestionIcon, SyncIcon, TrashIcon} from '@primer/octicons-react'
 import {useEffect, useMemo, useState} from 'react'
 import {useTranslation} from 'react-i18next'
 import {useNavigate} from 'react-router-dom'
 import {ApiError} from '../api/client'
-import {createProfileKey, deleteProfileKey, getPublicWebConfig, importGuestProfileKey, listProfileKeys, refreshProfileKey, renameAccountProfile} from '../api/profileKeysApi'
+import {createProfileKey, deleteProfileKey, downloadLatestClientRelease, getPublicWebConfig, importGuestProfileKey, listProfileKeys, refreshProfileKey, renameAccountProfile} from '../api/profileKeysApi'
 import {useAuth} from '../auth/AuthProvider'
 import type {Profile} from '../api/types'
 import {ConfirmDialog} from '../components/ConfirmDialog'
@@ -15,6 +15,7 @@ import {FormDialog} from '../components/FormDialog'
 import {LoadingState} from '../components/LoadingState'
 import {RelativeTime} from '../components/RelativeTime'
 import {StatusLabel} from '../components/StatusLabel'
+import {githubRepositoryUrl} from '../components/GitHubProjectLink'
 
 type PendingAction = {type: 'refresh' | 'delete'; profile: Profile} | null
 type RenameTarget = Profile | null
@@ -38,6 +39,8 @@ export function ProfileKeysPage() {
   const [importError, setImportError] = useState<string | null>(null)
   const [renameTarget, setRenameTarget] = useState<RenameTarget>(null)
   const [renameName, setRenameName] = useState('')
+  const [isClientDownloadOpen, setIsClientDownloadOpen] = useState(false)
+  const [isClientDownloadBusy, setIsClientDownloadBusy] = useState(false)
 
   useEffect(() => {
     let cancelled = false
@@ -180,6 +183,20 @@ export function ProfileKeysPage() {
     }
   }
 
+  async function handleClientReleaseDownload() {
+    setIsClientDownloadBusy(true)
+    setError(null)
+    try {
+      const {blob, filename} = await downloadLatestClientRelease()
+      saveBlob(blob, filename || 'MAS_UniSync-latest.zip')
+      setIsClientDownloadOpen(false)
+    } catch {
+      setError(t('account.profileKeys.clientReleaseDownloadError'))
+    } finally {
+      setIsClientDownloadBusy(false)
+    }
+  }
+
   return (
     <Box className="page-stack">
       <Box className="page-heading">
@@ -187,16 +204,21 @@ export function ProfileKeysPage() {
           <Text as="h1">{t('account.profileKeys.title')}</Text>
           <Text as="p">{t('account.profileKeys.description')}</Text>
         </Box>
-        {!isGuest ? (
-          <Box className="profile-heading-actions">
+        <Box className="profile-heading-actions">
+          <Button type="button" leadingVisual={DownloadIcon} onClick={() => { setError(null); setIsClientDownloadOpen(true) }}>
+            {t('account.profileKeys.downloadClient')}
+          </Button>
+          {!isGuest ? (
+            <>
             <Button type="button" leadingVisual={KeyIcon} onClick={() => { setImportError(null); setIsImportOpen(true) }}>
               {t('account.profileKeys.importGuest')}
             </Button>
             <Button type="button" variant="primary" leadingVisual={PlusIcon} onClick={() => setIsCreateOpen(true)}>
               {t('account.profileKeys.newKey')}
             </Button>
-          </Box>
-        ) : null}
+            </>
+          ) : null}
+        </Box>
       </Box>
 
       {error ? <ErrorBanner message={error} /> : null}
@@ -363,6 +385,37 @@ export function ProfileKeysPage() {
         </form>
       ) : null}
 
+      {isClientDownloadOpen ? (
+        <Box className="dialog-backdrop" role="presentation">
+          <Box className="confirm-dialog" role="dialog" aria-modal="true" aria-labelledby="client-release-dialog-title">
+            <Text as="h2" id="client-release-dialog-title" sx={{fontSize: 3, m: 0}}>
+              {t('account.profileKeys.downloadClient')}
+            </Text>
+            <Text as="p" sx={{color: 'fg.muted', my: 3}}>
+              {t('account.profileKeys.downloadClientMessage')}
+            </Text>
+            <Box sx={{display: 'flex', flexDirection: 'column', gap: 2}}>
+              <Button
+                type="button"
+                leadingVisual={MarkGithubIcon}
+                onClick={() => window.open(`${githubRepositoryUrl}/releases`, '_blank', 'noreferrer')}
+                disabled={isClientDownloadBusy}
+              >
+                {t('account.profileKeys.openGitHubReleases')}
+              </Button>
+              <Button type="button" variant="primary" leadingVisual={DownloadIcon} onClick={handleClientReleaseDownload} disabled={isClientDownloadBusy}>
+                {t('account.profileKeys.downloadFromCache')}
+              </Button>
+            </Box>
+            <Box sx={{display: 'flex', justifyContent: 'flex-end', gap: 2, mt: 3}}>
+              <Button type="button" onClick={() => setIsClientDownloadOpen(false)} disabled={isClientDownloadBusy}>
+                {t('common.cancel')}
+              </Button>
+            </Box>
+          </Box>
+        </Box>
+      ) : null}
+
       {pendingAction ? (
         <ConfirmDialog
           title={pendingAction.type === 'refresh' ? t('account.profileKeys.refreshTitle') : t('account.profileKeys.deleteTitle')}
@@ -375,4 +428,13 @@ export function ProfileKeysPage() {
       ) : null}
     </Box>
   )
+}
+
+function saveBlob(blob: Blob, filename: string) {
+  const url = URL.createObjectURL(blob)
+  const link = document.createElement('a')
+  link.href = url
+  link.download = filename
+  link.click()
+  URL.revokeObjectURL(url)
 }

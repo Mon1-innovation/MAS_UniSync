@@ -23,6 +23,7 @@ services:
       MAS_UNISYNC_ENV: production
       DATABASE_URL: postgresql+psycopg://${POSTGRES_USER:-mas_unisync}:${POSTGRES_PASSWORD:?POSTGRES_PASSWORD must be set}@postgres:5432/${POSTGRES_DB:-mas_unisync}
       OBJECT_STORAGE_PATH: /data/objects
+      CLIENT_RELEASE_CACHE_PATH: /data/client-releases
       SESSION_SECRET: ${SESSION_SECRET:?SESSION_SECRET must be set}
       FLARUM_URL: ${FLARUM_URL:-https://forum.example}
       ADMIN_FLARUM_GROUP_IDS: ${ADMIN_FLARUM_GROUP_IDS:-}
@@ -30,6 +31,7 @@ services:
       LOCK_TTL_SECONDS: ${LOCK_TTL_SECONDS:-60}
     volumes:
       - object_data:/data/objects
+      - client_release_cache:/data/client-releases
     ports:
       - "${BACKEND_PORT:-8000}:8000"
     restart: unless-stopped
@@ -45,3 +47,4 @@ services:
 volumes:
   postgres_data:
   object_data:
+  client_release_cache:

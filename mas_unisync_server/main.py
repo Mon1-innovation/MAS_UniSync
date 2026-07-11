@@ -6,7 +6,7 @@ from datetime import date, datetime, time, timedelta
 import secrets
 
 from fastapi import BackgroundTasks, Depends, FastAPI, File, Form, Header, HTTPException, Query, Request, Response, UploadFile
-from fastapi.responses import StreamingResponse
+from fastapi.responses import FileResponse, StreamingResponse
 from sqlalchemy import String, cast, desc, func, inspect, or_, select, text
 from sqlalchemy.orm import Session
 from starlette.middleware.sessions import SessionMiddleware
@@ -22,6 +22,7 @@ from .services import (
     audit,
     aware,
     backup_payload,
+    cache_latest_client_release,
     cleanup_expired_locks,
     cleanup_expired_guest_profiles,
     banned_exception,
@@ -180,6 +181,15 @@ def create_app(settings: Settings | None = None, flarum_client=None) -> FastAPI:
             "frontend_web_url": frontend_web_url,
             "profile_keys_url": frontend_web_url.rstrip("/") + "/account/profile-keys",
         }
+
+    @app.get("/account/client-release/latest/download")
+    def download_latest_client_release(request: Request, user: User = Depends(current_user)):
+        cached_release = cache_latest_client_release(request.app.state.settings)
+        return FileResponse(
+            cached_release.path,
+            media_type="application/zip",
+            filename=cached_release.filename,
+        )
 
     @app.get("/account/profile-keys")
     def list_profile_keys(request: Request, user: User = Depends(current_user), db: Session = Depends(get_db)):

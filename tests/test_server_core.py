@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from datetime import datetime, timedelta, timezone
 
+import httpx
 import pytest
 from fastapi.testclient import TestClient
 from sqlalchemy import select
@@ -60,6 +61,7 @@ def client(tmp_path):
     settings = Settings(
         database_url=f"sqlite:///{tmp_path / 'server.db'}",
         object_storage_path=tmp_path / "objects",
+        client_release_cache_path=tmp_path / "client-releases",
         session_secret="test-secret",
         admin_flarum_group_ids={"1"},
         admin_flarum_group_names={"Admin"},
@@ -73,6 +75,7 @@ def make_client(tmp_path, *, trusted_proxy_ips: set[str] | None = None, client_h
     settings = Settings(
         database_url=f"sqlite:///{tmp_path / 'server.db'}",
         object_storage_path=tmp_path / "objects",
+        client_release_cache_path=tmp_path / "client-releases",
         session_secret="test-secret",
         admin_flarum_group_ids={"1"},
         admin_flarum_group_names={"Admin"},
@@ -1774,6 +1777,67 @@ def test_public_config_web_url_uses_saved_frontend_url_or_origin_fallback(client
         "frontend_web_url": "https://portal.example.test",
         "profile_keys_url": "https://portal.example.test/account/profile-keys",
     }
+
+
+def test_account_client_release_download_caches_latest_github_asset(client, monkeypatch):
+    login(client)
+    asset_url = "https://uploads.github.test/MAS_UniSync-0.1.0.zip"
+    requested_urls = []
+
+    class FakeGitHubResponse:
+        def __init__(self, *, json_payload=None, content=b"", status_code=200):
+            self._json_payload = json_payload
+            self.content = content
+            self.status_code = status_code
+
+        def json(self):
+            return self._json_payload
+
+        def raise_for_status(self):
+            if self.status_code >= 400:
+                request = httpx.Request("GET", requested_urls[-1])
+                response = httpx.Response(self.status_code, request=request)
+                raise httpx.HTTPStatusError("github request failed", request=request, response=response)
+
+    def fake_get(url, **_kwargs):
+        requested_urls.append(url)
+        if url == "https://api.github.com/repos/Mon1-innovation/MAS_UniSync/releases/latest":
+            return FakeGitHubResponse(
+                json_payload={
+                    "tag_name": "0.1.0",
+                    "assets": [
+                        {
+                            "id": 123,
+                            "name": "MAS_UniSync-0.1.0.zip",
+                            "size": len(b"release-zip"),
+                            "browser_download_url": asset_url,
+                        }
+                    ],
+                }
+            )
+        if url == asset_url:
+            return FakeGitHubResponse(content=b"release-zip")
+        raise AssertionError(f"unexpected GitHub URL: {url}")
+
+    monkeypatch.setattr(httpx, "get", fake_get)
+
+    first = client.get("/account/client-release/latest/download")
+    second = client.get("/account/client-release/latest/download")
+
+    assert first.status_code == 200
+    assert first.content == b"release-zip"
+    assert first.headers["content-type"].startswith("application/zip")
+    assert 'filename="MAS_UniSync-0.1.0.zip"' in first.headers["content-disposition"]
+    assert second.status_code == 200
+    assert second.content == b"release-zip"
+    assert requested_urls.count(asset_url) == 1
+    assert (client.app.state.settings.client_release_cache_path / "MAS_UniSync-0.1.0.zip").read_bytes() == b"release-zip"
+
+
+def test_account_client_release_download_requires_session(client):
+    response = client.get("/account/client-release/latest/download")
+
+    assert response.status_code == 401
 
 
 def test_admin_delete_profile_key_removes_profile_and_writes_audit_log(client):

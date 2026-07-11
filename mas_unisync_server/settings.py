@@ -21,6 +21,7 @@ class Settings(BaseModel):
     environment: str = "test"
     database_url: str = DEFAULT_SQLITE_DATABASE_URL
     object_storage_path: Path = Path("./data/objects")
+    client_release_cache_path: Path = Path("./data/client-releases")
     session_secret: str = "change-me"
     flarum_url: str = "https://forum.example"
     admin_flarum_group_ids: set[str] = Field(default_factory=set)
@@ -93,6 +94,7 @@ def build_settings() -> Settings:
         environment=environment,
         database_url=_database_url_for_environment(environment),
         object_storage_path=Path(os.getenv("OBJECT_STORAGE_PATH", "./data/objects")),
+        client_release_cache_path=Path(os.getenv("CLIENT_RELEASE_CACHE_PATH", "./data/client-releases")),
         session_secret=os.getenv("SESSION_SECRET", "local-dev-session"),
         flarum_url=os.getenv("FLARUM_URL", "https://forum.example"),
         admin_flarum_group_ids=parse_csv_set(os.getenv("ADMIN_FLARUM_GROUP_IDS")),
