@@ -354,6 +354,72 @@ describe('App', () => {
     expect(submittedBody).toEqual({display_name: 'Laptop'})
   })
 
+  it('renames a profile from the profile keys list', async () => {
+    localStorage.setItem('mas_unisync_user', JSON.stringify(normalUser))
+    let submittedBody: unknown
+    mockFetch(async (input, init) => {
+      if (input === '/account/profile-keys' && !init?.method) {
+        return json({
+          items: [
+            {
+              id: 9,
+              user_id: 2,
+              display_name: 'Main',
+              profile_key: 'maspk_main',
+              storage_usage: 0,
+              storage_limit: 10485760,
+              lock_status: 'none',
+              revoked_at: null,
+              last_used_at: null,
+              last_upload_at: null,
+              created_at: '2026-07-07T08:00:00',
+              is_guest: false,
+              guest_retention_days: null,
+              guest_expires_at: null,
+            },
+          ],
+        })
+      }
+      if (input === '/account/profiles/9' && init?.method === 'PATCH') {
+        submittedBody = JSON.parse(String(init.body))
+        return json({
+          id: 9,
+          user_id: 2,
+          display_name: 'Desktop',
+          profile_key: 'maspk_main',
+          storage_usage: 0,
+          storage_limit: 10485760,
+          lock_status: 'none',
+          revoked_at: null,
+          last_used_at: null,
+          last_upload_at: null,
+          created_at: '2026-07-07T08:00:00',
+          is_guest: false,
+          guest_retention_days: null,
+          guest_expires_at: null,
+        })
+      }
+      return json({detail: {code: 'not_found'}}, {status: 404})
+    })
+
+    render(
+      <MemoryRouter initialEntries={['/account/profile-keys']}>
+        <App />
+      </MemoryRouter>,
+    )
+
+    await userEvent.click(await screen.findByRole('button', {name: /改名 Main/i}))
+    expect(screen.getByDisplayValue('Main')).toBeInTheDocument()
+    await userEvent.clear(screen.getByLabelText(/显示名称/i))
+    await userEvent.type(screen.getByLabelText(/显示名称/i), 'Desktop')
+    await userEvent.click(screen.getByRole('button', {name: /^保存$/i}))
+
+    await expect(screen.findByText('Desktop')).resolves.toBeInTheDocument()
+    expect(screen.queryByText('Main')).not.toBeInTheDocument()
+    expect(submittedBody).toEqual({display_name: 'Desktop'})
+    expectFetchCalled('/account/profiles/9', {method: 'PATCH'})
+  })
+
   it('shows a specific error when profile key creation reaches the account limit', async () => {
     localStorage.setItem('mas_unisync_user', JSON.stringify(normalUser))
     mockFetch(async (input, init) => {
@@ -1194,6 +1260,122 @@ describe('App', () => {
     expect(screen.getByText('maspk_empty')).toBeInTheDocument()
     expect(screen.getByText(/(no current persistent|没有当前 persistent)/i)).toBeInTheDocument()
     expect(screen.queryByText(/could not load this profile/i)).not.toBeInTheDocument()
+  })
+
+  it('renames a profile from the profile detail page', async () => {
+    localStorage.setItem('mas_unisync_user', JSON.stringify(normalUser))
+    let submittedBody: unknown
+    mockFetch((input, init) => {
+      if (input === '/account/profile-keys') {
+        return json({items: []})
+      }
+      if (input === '/account/profiles/10' && !init?.method) {
+        return json({
+          profile: {
+            id: 10,
+            user_id: 2,
+            display_name: 'Fresh profile',
+            profile_key: 'maspk_empty',
+            storage_usage: 0,
+            storage_limit: 10485760,
+            lock_status: 'none',
+            revoked_at: null,
+            last_used_at: null,
+            last_upload_at: null,
+            created_at: '2026-07-07T08:00:00',
+            is_guest: false,
+            guest_retention_days: null,
+            guest_expires_at: null,
+          },
+        })
+      }
+      if (input === '/account/profiles/10' && init?.method === 'PATCH') {
+        submittedBody = JSON.parse(String(init.body))
+        return json({
+          id: 10,
+          user_id: 2,
+          display_name: 'Laptop',
+          profile_key: 'maspk_empty',
+          storage_usage: 0,
+          storage_limit: 10485760,
+          lock_status: 'none',
+          revoked_at: null,
+          last_used_at: null,
+          last_upload_at: null,
+          created_at: '2026-07-07T08:00:00',
+          is_guest: false,
+          guest_retention_days: null,
+          guest_expires_at: null,
+        })
+      }
+      if (input === '/account/profiles/10/persistent/current') {
+        return json({detail: {code: 'no_current_persistent'}}, {status: 404})
+      }
+      if (input === '/account/profiles/10/persistent/backups') {
+        return json({items: []})
+      }
+      return json({detail: {code: 'not_found'}}, {status: 404})
+    })
+
+    render(
+      <MemoryRouter initialEntries={['/account/profiles/10']}>
+        <App />
+      </MemoryRouter>,
+    )
+
+    await expect(screen.findByRole('heading', {level: 1, name: 'Fresh profile'})).resolves.toBeInTheDocument()
+    await userEvent.click(screen.getByRole('button', {name: /改名 Fresh profile/i}))
+    await userEvent.clear(screen.getByLabelText(/显示名称/i))
+    await userEvent.type(screen.getByLabelText(/显示名称/i), 'Laptop')
+    await userEvent.click(screen.getByRole('button', {name: /^保存$/i}))
+
+    await expect(screen.findByRole('heading', {level: 1, name: 'Laptop'})).resolves.toBeInTheDocument()
+    expect(submittedBody).toEqual({display_name: 'Laptop'})
+  })
+
+  it('does not show profile rename controls on a guest profile detail page', async () => {
+    localStorage.setItem('mas_unisync_user', JSON.stringify(guestUser))
+    mockFetch((input) => {
+      if (input === '/account/profile-keys') {
+        return json({items: []})
+      }
+      if (input === '/account/profiles/30') {
+        return json({
+          profile: {
+            id: 30,
+            user_id: 3,
+            display_name: 'Guest',
+            profile_key: 'maspk_guest',
+            storage_usage: 0,
+            storage_limit: 10485760,
+            lock_status: 'none',
+            revoked_at: null,
+            last_used_at: '2026-07-10T08:00:00Z',
+            last_upload_at: null,
+            created_at: '2026-07-10T08:00:00Z',
+            is_guest: true,
+            guest_retention_days: 360,
+            guest_expires_at: '2027-07-05T08:00:00Z',
+          },
+        })
+      }
+      if (input === '/account/profiles/30/persistent/current') {
+        return json({detail: {code: 'no_current_persistent'}}, {status: 404})
+      }
+      if (input === '/account/profiles/30/persistent/backups') {
+        return json({items: []})
+      }
+      return json({detail: {code: 'not_found'}}, {status: 404})
+    })
+
+    render(
+      <MemoryRouter initialEntries={['/account/profiles/30']}>
+        <App />
+      </MemoryRouter>,
+    )
+
+    await expect(screen.findByRole('heading', {level: 1, name: 'Guest'})).resolves.toBeInTheDocument()
+    expect(screen.queryByRole('button', {name: /改名/i})).not.toBeInTheDocument()
   })
 
   it('shows a specific message when an account profile is not owned by the user', async () => {

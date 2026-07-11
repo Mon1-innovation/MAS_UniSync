@@ -1,5 +1,5 @@
 import {Box, Button, Text} from '@primer/react'
-import {ArrowLeftIcon, DownloadIcon, UnlockIcon, VersionsIcon} from '@primer/octicons-react'
+import {ArrowLeftIcon, DownloadIcon, PencilIcon, UnlockIcon, VersionsIcon} from '@primer/octicons-react'
 import {useEffect, useState} from 'react'
 import type {ReactNode} from 'react'
 import {useTranslation} from 'react-i18next'
@@ -12,14 +12,17 @@ import {
   getAccountProfile,
   listAccountBackups,
   releaseAccountProfileLock,
+  renameAccountProfile,
   restoreAccountBackup,
 } from '../api/profileKeysApi'
+import {useAuth} from '../auth/AuthProvider'
 import type {Backup, Profile, Version} from '../api/types'
 import {ByteSize} from '../components/ByteSize'
 import {ConfirmDialog} from '../components/ConfirmDialog'
 import {CopyableSecret} from '../components/CopyableSecret'
 import {EmptyState} from '../components/EmptyState'
 import {ErrorBanner} from '../components/ErrorBanner'
+import {FormDialog} from '../components/FormDialog'
 import {LoadingState} from '../components/LoadingState'
 import {RelativeTime} from '../components/RelativeTime'
 import {StorageUsageBar} from '../components/StorageUsageBar'
@@ -27,6 +30,7 @@ import {StatusLabel} from '../components/StatusLabel'
 
 export function ProfileDetailPage() {
   const {t} = useTranslation()
+  const {user} = useAuth()
   const {profileId} = useParams()
   const numericProfileId = Number(profileId)
   const [profile, setProfile] = useState<Profile | null>(null)
@@ -37,6 +41,9 @@ export function ProfileDetailPage() {
   const [downloadingId, setDownloadingId] = useState<number | 'current' | null>(null)
   const [isBusy, setIsBusy] = useState(false)
   const [isUnlockConfirmOpen, setIsUnlockConfirmOpen] = useState(false)
+  const [isRenameOpen, setIsRenameOpen] = useState(false)
+  const [renameName, setRenameName] = useState('')
+  const isGuest = user?.role === 'guest'
 
   useEffect(() => {
     let cancelled = false
@@ -123,6 +130,37 @@ export function ProfileDetailPage() {
     }
   }
 
+  function profileName(currentProfile: Profile) {
+    return currentProfile.display_name || t('account.profileDetail.profileTitle', {id: currentProfile.id})
+  }
+
+  function openRenameDialog() {
+    if (!profile) {
+      return
+    }
+    setRenameName(profile.display_name || '')
+    setError(null)
+    setIsRenameOpen(true)
+  }
+
+  async function handleRename(event: React.FormEvent<HTMLFormElement>) {
+    event.preventDefault()
+    if (!profile) {
+      return
+    }
+    setIsBusy(true)
+    setError(null)
+    try {
+      setProfile(await renameAccountProfile(profile.id, renameName.trim() || null))
+      setIsRenameOpen(false)
+      setRenameName('')
+    } catch {
+      setError(t('account.profileDetail.renameError'))
+    } finally {
+      setIsBusy(false)
+    }
+  }
+
   const lockLabelStatus = profile?.lock_status === 'active' ? 'locked' : 'unlocked'
 
   return (
@@ -145,7 +183,19 @@ export function ProfileDetailPage() {
                 <RelativeTime value={profile.last_upload_at} />
               </Text>
             </Box>
-            <StatusLabel status={profile.revoked_at ? 'revoked' : 'active'} />
+            <Box className="profile-heading-actions">
+              {!isGuest ? (
+                <Button
+                  type="button"
+                  leadingVisual={PencilIcon}
+                  aria-label={t('account.profileDetail.renameProfileFor', {name: profileName(profile)})}
+                  onClick={openRenameDialog}
+                >
+                  {t('account.profileDetail.renameProfile')}
+                </Button>
+              ) : null}
+              <StatusLabel status={profile.revoked_at ? 'revoked' : 'active'} />
+            </Box>
           </Box>
 
           <Box className="panel">
@@ -283,6 +333,27 @@ export function ProfileDetailPage() {
           onCancel={() => setIsUnlockConfirmOpen(false)}
           isBusy={isBusy}
         />
+      ) : null}
+      {isRenameOpen && profile ? (
+        <form onSubmit={handleRename}>
+          <FormDialog
+            title={t('account.profileDetail.renameTitle', {name: profileName(profile)})}
+            submitText={t('account.profileDetail.renameSubmit')}
+            onCancel={() => setIsRenameOpen(false)}
+            isBusy={isBusy}
+          >
+            <label className="field">
+              <span>{t('account.profileDetail.displayName')}</span>
+              <input
+                value={renameName}
+                onChange={(event) => setRenameName(event.target.value)}
+                placeholder={t('account.profileDetail.displayNamePlaceholder')}
+                maxLength={255}
+                autoFocus
+              />
+            </label>
+          </FormDialog>
+        </form>
       ) : null}
     </Box>
   )

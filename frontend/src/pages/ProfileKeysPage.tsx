@@ -1,10 +1,10 @@
 import {Box, Button, Text} from '@primer/react'
-import {FileDirectoryIcon, KeyIcon, PlusIcon, QuestionIcon, SyncIcon, TrashIcon} from '@primer/octicons-react'
+import {FileDirectoryIcon, KeyIcon, PencilIcon, PlusIcon, QuestionIcon, SyncIcon, TrashIcon} from '@primer/octicons-react'
 import {useEffect, useMemo, useState} from 'react'
 import {useTranslation} from 'react-i18next'
 import {useNavigate} from 'react-router-dom'
 import {ApiError} from '../api/client'
-import {createProfileKey, deleteProfileKey, getPublicWebConfig, importGuestProfileKey, listProfileKeys, refreshProfileKey} from '../api/profileKeysApi'
+import {createProfileKey, deleteProfileKey, getPublicWebConfig, importGuestProfileKey, listProfileKeys, refreshProfileKey, renameAccountProfile} from '../api/profileKeysApi'
 import {useAuth} from '../auth/AuthProvider'
 import type {Profile} from '../api/types'
 import {ConfirmDialog} from '../components/ConfirmDialog'
@@ -17,6 +17,7 @@ import {RelativeTime} from '../components/RelativeTime'
 import {StatusLabel} from '../components/StatusLabel'
 
 type PendingAction = {type: 'refresh' | 'delete'; profile: Profile} | null
+type RenameTarget = Profile | null
 
 export function ProfileKeysPage() {
   const {t} = useTranslation()
@@ -35,6 +36,8 @@ export function ProfileKeysPage() {
   const [isImportOpen, setIsImportOpen] = useState(false)
   const [importKey, setImportKey] = useState('')
   const [importError, setImportError] = useState<string | null>(null)
+  const [renameTarget, setRenameTarget] = useState<RenameTarget>(null)
+  const [renameName, setRenameName] = useState('')
 
   useEffect(() => {
     let cancelled = false
@@ -78,6 +81,16 @@ export function ProfileKeysPage() {
 
   function removeProfile(profileId: number) {
     setProfiles((current) => current.filter((profile) => profile.id !== profileId))
+  }
+
+  function profileName(profile: Profile) {
+    return profile.display_name || t('account.profileKeys.profileTitle', {id: profile.id})
+  }
+
+  function openRenameDialog(profile: Profile) {
+    setRenameTarget(profile)
+    setRenameName(profile.display_name || '')
+    setError(null)
   }
 
   async function handleCreate(event: React.FormEvent<HTMLFormElement>) {
@@ -144,6 +157,24 @@ export function ProfileKeysPage() {
       } else {
         setImportError(t('account.profileKeys.importError'))
       }
+    } finally {
+      setIsBusy(false)
+    }
+  }
+
+  async function handleRename(event: React.FormEvent<HTMLFormElement>) {
+    event.preventDefault()
+    if (!renameTarget) {
+      return
+    }
+    setIsBusy(true)
+    setError(null)
+    try {
+      replaceProfile(await renameAccountProfile(renameTarget.id, renameName.trim() || null))
+      setRenameTarget(null)
+      setRenameName('')
+    } catch {
+      setError(t('account.profileKeys.renameError'))
     } finally {
       setIsBusy(false)
     }
@@ -239,6 +270,15 @@ export function ProfileKeysPage() {
                   <Button
                     type="button"
                     size="small"
+                    leadingVisual={PencilIcon}
+                    aria-label={t('account.profileKeys.renameProfileFor', {name: profileName(profile)})}
+                    onClick={() => openRenameDialog(profile)}
+                  >
+                    {t('account.profileKeys.renameProfile')}
+                  </Button>
+                  <Button
+                    type="button"
+                    size="small"
                     leadingVisual={SyncIcon}
                     aria-label={t('account.profileKeys.refreshKeyFor', {name: profile.display_name || profile.id})}
                     onClick={() => setPendingAction({type: 'refresh', profile})}
@@ -277,6 +317,28 @@ export function ProfileKeysPage() {
                 value={createName}
                 onChange={(event) => setCreateName(event.target.value)}
                 placeholder={t('account.profileKeys.displayNamePlaceholder')}
+                autoFocus
+              />
+            </label>
+          </FormDialog>
+        </form>
+      ) : null}
+
+      {renameTarget ? (
+        <form onSubmit={handleRename}>
+          <FormDialog
+            title={t('account.profileKeys.renameTitle', {name: profileName(renameTarget)})}
+            submitText={t('account.profileKeys.renameSubmit')}
+            onCancel={() => setRenameTarget(null)}
+            isBusy={isBusy}
+          >
+            <label className="field">
+              <span>{t('account.profileKeys.displayName')}</span>
+              <input
+                value={renameName}
+                onChange={(event) => setRenameName(event.target.value)}
+                placeholder={t('account.profileKeys.displayNamePlaceholder')}
+                maxLength={255}
                 autoFocus
               />
             </label>

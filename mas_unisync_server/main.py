@@ -55,7 +55,7 @@ from .services import (
     user_storage_usage,
     version_payload,
 )
-from .schemas import BanRequest, LoginRequest, ProfileCreateRequest, ProfileKeyRequest, StorageBucketRequest, SystemSettingsRequest
+from .schemas import BanRequest, LoginRequest, ProfileCreateRequest, ProfileKeyRequest, ProfileRenameRequest, StorageBucketRequest, SystemSettingsRequest
 from .settings import Settings
 from .storage import LocalObjectStorage
 
@@ -355,6 +355,30 @@ def create_app(settings: Settings | None = None, flarum_client=None) -> FastAPI:
     def get_account_profile(profile_id: int, request: Request, user: User = Depends(current_user), db: Session = Depends(get_db)):
         profile = owned_profile_or_404(db, profile_id, user)
         return {"profile": profile_response_payload(db, profile, request_now(request))}
+
+    @app.patch("/account/profiles/{profile_id}")
+    def rename_account_profile(
+        profile_id: int,
+        payload: ProfileRenameRequest,
+        request: Request,
+        user: User = Depends(regular_user),
+        db: Session = Depends(get_db),
+    ):
+        profile = owned_profile_or_404(db, profile_id, user)
+        display_name = payload.display_name.strip() if payload.display_name is not None else ""
+        profile.display_name = display_name or None
+        profile.updated_at = request_now(request)
+        audit(
+            db,
+            request,
+            user,
+            "profile.rename",
+            target_user_id=user.id,
+            target_profile_id=profile.id,
+            target_profile_key_id=profile.id,
+        )
+        db.commit()
+        return profile_response_payload(db, profile, request_now(request))
 
     @app.post("/account/profiles/{profile_id}/lock/release", status_code=204)
     def release_account_profile_lock(

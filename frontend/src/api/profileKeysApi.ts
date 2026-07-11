@@ -23,6 +23,13 @@ export function importGuestProfileKey(profileKey: string) {
   })
 }
 
+export function renameAccountProfile(profileId: number, displayName: string | null) {
+  return request<Profile>(`/account/profiles/${profileId}`, {
+    method: 'PATCH',
+    body: {display_name: displayName || null},
+  })
+}
+
 export function refreshProfileKey(profileId: number) {
   return request<Profile>(`/account/profile-keys/${profileId}/refresh`, {method: 'POST'})
 }

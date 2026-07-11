@@ -18,6 +18,10 @@ class ProfileCreateRequest(BaseModel):
     display_name: str | None = None
 
 
+class ProfileRenameRequest(BaseModel):
+    display_name: str | None = Field(default=None, max_length=255)
+
+
 class BanRequest(BaseModel):
     reason: str | None = None
 

@@ -444,6 +444,63 @@ def test_profile_key_generation_lists_plaintext_and_refresh_invalidates_old_key(
     assert current.json()["sha256"] == upload.json()["sha256"]
 
 
+def test_account_profile_rename_updates_list_detail_and_audit_log(client):
+    profile = new_profile(client)
+
+    renamed = client.patch(
+        f"/account/profiles/{profile['id']}",
+        json={"display_name": "  Desktop profile  "},
+    )
+
+    assert renamed.status_code == 200
+    assert renamed.json()["display_name"] == "Desktop profile"
+    assert client.get(f"/account/profiles/{profile['id']}").json()["profile"]["display_name"] == "Desktop profile"
+    listed = client.get("/account/profile-keys").json()["items"]
+    assert listed[0]["display_name"] == "Desktop profile"
+    with client.app.state.SessionLocal() as db:
+        stored = db.get(Profile, profile["id"])
+        assert stored.display_name == "Desktop profile"
+        assert stored.updated_at is not None
+        audit_log = db.scalar(select(AuditLog).where(AuditLog.action == "profile.rename"))
+    assert audit_log is not None
+    assert audit_log.target_user_id == profile["user_id"]
+    assert audit_log.target_profile_id == profile["id"]
+    assert audit_log.target_profile_key_id == profile["id"]
+
+
+def test_account_profile_rename_blank_name_stores_null(client):
+    profile = new_profile(client)
+
+    renamed = client.patch(f"/account/profiles/{profile['id']}", json={"display_name": "   "})
+
+    assert renamed.status_code == 200
+    assert renamed.json()["display_name"] is None
+    with client.app.state.SessionLocal() as db:
+        assert db.get(Profile, profile["id"]).display_name is None
+
+
+def test_account_profile_rename_rejects_foreign_profiles(client):
+    login(client, "admin@example.com")
+    foreign_profile = client.post("/account/profile-keys", json={"display_name": "Admin profile"}).json()
+    client.post("/logout")
+    login(client)
+
+    response = client.patch(f"/account/profiles/{foreign_profile['id']}", json={"display_name": "Mine"})
+
+    assert response.status_code == 404
+    assert response.json()["detail"]["code"] == "profile_not_found"
+
+
+def test_guest_account_cannot_rename_profile(client):
+    guest = new_guest_profile(client)
+    assert client.post("/login/guest", json={"profile_key": guest["profile_key"]}).status_code == 200
+
+    response = client.patch(f"/account/profiles/{guest['id']}", json={"display_name": "Renamed guest"})
+
+    assert response.status_code == 403
+    assert response.json()["detail"]["code"] == "guest_account_read_only"
+
+
 def test_delete_profile_key_removes_rows_and_object_files(client):
     profile = new_profile(client)
     key = profile["profile_key"]
