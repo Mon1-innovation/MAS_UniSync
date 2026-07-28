@@ -66,6 +66,42 @@ def test_http_error_description_prefers_machine_readable_detail():
     assert http.describe_error_body(b"") == "no response body"
 
 
+def test_default_https_requests_extend_system_trust_with_bundled_ca(monkeypatch):
+    http = load_client_module("mas_unisync_http")
+    calls = []
+
+    class FakeContext:
+        def load_verify_locations(self, cafile=None):
+            calls.append(("load_verify_locations", cafile))
+
+    class FakeResponse:
+        def getcode(self):
+            return 200
+
+        def read(self):
+            return b"{}"
+
+        def close(self):
+            pass
+
+    context = FakeContext()
+    monkeypatch.setattr(http.ssl, "create_default_context", lambda: context)
+    monkeypatch.setattr(
+        http.urllib_request,
+        "urlopen",
+        lambda request, timeout, context: calls.append(
+            ("urlopen", request.full_url, timeout, context)
+        )
+        or FakeResponse(),
+    )
+
+    assert http.request("GET", "https://api.example.test/health") == (200, b"{}")
+    assert calls == [
+        ("load_verify_locations", str((CLIENT_DIR / "isrg-root-x1.pem").resolve())),
+        ("urlopen", "https://api.example.test/health", 30, context),
+    ]
+
+
 def test_load_pickle_payload_accepts_python2_datetime_binary_state():
     core = load_client_module("mas_unisync_core")
     py2_datetime_pickle = (

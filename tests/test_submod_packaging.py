@@ -227,7 +227,7 @@ def test_settings_panel_can_copy_current_profile_key():
 
     assert "def mas_unisync_copy_profile_key():" in header_source
     assert "profile_key = mas_unisync_get_profile_key()" in header_source
-    assert 'pygame.scrap.put(pygame.SCRAP_TEXT, profile_key)' in header_source
+    assert 'pygame.scrap.put(pygame.SCRAP_TEXT, profile_key.encode("utf-8"))' in header_source
     assert 'renpy.notify(_("MAS UniSync Profile Key 已复制"))' in header_source
     assert 'textbutton _("复制当前 Profile Key"):' in header_source
     assert "action Function(mas_unisync_copy_profile_key)" in header_source

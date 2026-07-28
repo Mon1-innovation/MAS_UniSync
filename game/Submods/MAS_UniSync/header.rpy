@@ -5,7 +5,7 @@ init -990 python:
     import pygame
     import json
 
-    mas_unisync_version = "1.0.0"
+    mas_unisync_version = "1.0.1"
 
     mas_unisync_dir = os.path.join(renpy.config.gamedir, "Submods", "MAS_UniSync")
 
@@ -155,7 +155,7 @@ init -989 python:
             renpy.notify(_("Profile Key 未配置"))
             return
         try:
-            pygame.scrap.put(pygame.SCRAP_TEXT, profile_key)
+            pygame.scrap.put(pygame.SCRAP_TEXT, profile_key.encode("utf-8"))
             renpy.notify(_("MAS UniSync Profile Key 已复制"))
         except Exception as exc:
             mas_unisync_update_status(message=mas_unisync_core.renpy_safe_text(str(exc)))

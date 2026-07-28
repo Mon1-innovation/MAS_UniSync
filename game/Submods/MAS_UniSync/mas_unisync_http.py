@@ -5,6 +5,7 @@ import hashlib
 import mimetypes
 import os
 import socket
+import ssl
 
 try:
     from urllib import request as urllib_request
@@ -22,6 +23,18 @@ class UniSyncHTTPError(Exception):
 
 
 DEFAULT_TIMEOUT = 30
+
+
+def bundled_ca_path():
+    return os.path.join(os.path.dirname(os.path.abspath(__file__)), "isrg-root-x1.pem")
+
+
+def default_urlopen(req, timeout):
+    if req.get_full_url().lower().startswith("https://"):
+        context = ssl.create_default_context()
+        context.load_verify_locations(cafile=bundled_ca_path())
+        return urllib_request.urlopen(req, timeout=timeout, context=context)
+    return urllib_request.urlopen(req, timeout=timeout)
 
 
 def generate_multipart_boundary():
@@ -118,7 +131,7 @@ def make_request(method, url, headers=None, data=None):
 
 
 def request(method, url, headers=None, data=None, timeout=DEFAULT_TIMEOUT, urlopen=None):
-    urlopen = urlopen or urllib_request.urlopen
+    urlopen = urlopen or default_urlopen
     req = make_request(method, url, headers=headers, data=data)
     try:
         response = urlopen(req, timeout=timeout)
