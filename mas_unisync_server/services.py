@@ -1126,11 +1126,11 @@ def store_upload(
     db.flush()
     if old_object_path is not None and old_object_path != version.object_path:
         delete_version_object(db, settings, old_bucket_id, old_object_path)
-    prune_backups(db, profile.id)
+    prune_backups(db, settings, profile.id)
     return version
 
 
-def prune_backups(db: Session, profile_id: int) -> None:
+def prune_backups(db: Session, settings: Settings, profile_id: int) -> None:
     backups = list(
         db.scalars(
             select(PersistentDailyBackup)
@@ -1138,8 +1138,25 @@ def prune_backups(db: Session, profile_id: int) -> None:
             .order_by(desc(PersistentDailyBackup.backup_date), desc(PersistentDailyBackup.id))
         )
     )
-    for old in backups[10:]:
+    pruned = backups[10:]
+    for old in pruned:
         db.delete(old)
+    db.flush()
+
+    for old in pruned:
+        version = db.get(PersistentVersion, old.version_id)
+        if version is None:
+            continue
+        referenced_by_current = db.scalar(
+            select(PersistentCurrent.profile_id).where(PersistentCurrent.version_id == version.id)
+        )
+        referenced_by_backup = db.scalar(
+            select(PersistentDailyBackup.id).where(PersistentDailyBackup.version_id == version.id)
+        )
+        if referenced_by_current is not None or referenced_by_backup is not None:
+            continue
+        delete_version_object(db, settings, version.bucket_id, version.object_path)
+        db.delete(version)
 
 
 def restore_backup(db: Session, profile_id: int, backup_id: int, now: datetime) -> PersistentVersion:

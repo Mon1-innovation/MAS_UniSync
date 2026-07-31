@@ -608,9 +608,11 @@ def test_daily_backups_replace_same_day_and_retain_latest_ten_days(client):
     first_upload = upload_persistent(client, key, lease, b"day-1-a", now=base)
     assert first_upload.status_code == 201
     with client.app.state.SessionLocal() as db:
-        first_object_path = db.scalar(
-            select(PersistentVersion.object_path).where(PersistentVersion.profile_id == profile["id"])
+        first_version = db.scalar(
+            select(PersistentVersion).where(PersistentVersion.profile_id == profile["id"])
         )
+        first_object_path = first_version.object_path
+        first_version_id = first_version.id
     object_root = client.app.state.storage.root
     assert (object_root / first_object_path).exists()
 
@@ -660,6 +662,14 @@ def test_daily_backups_replace_same_day_and_retain_latest_ten_days(client):
     assert len(backups) == 10
     assert [item["backup_date"] for item in backups][0] == "2026-01-11"
     assert [item["backup_date"] for item in backups][-1] == "2026-01-02"
+    with client.app.state.SessionLocal() as db:
+        retained_versions = list(
+            db.scalars(select(PersistentVersion).where(PersistentVersion.profile_id == profile["id"]))
+        )
+    assert len(retained_versions) == 10
+    assert all(version.id != first_version_id for version in retained_versions)
+    assert not (object_root / first_object_path).exists()
+    assert len(list((object_root / str(profile["id"])).rglob("*.bin"))) == 10
 
 
 def test_account_profile_detail_exposes_owned_persistent_files(client):
