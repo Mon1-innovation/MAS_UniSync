@@ -23,6 +23,15 @@ def load_client_module(name: str):
     return module
 
 
+def test_exit_finalization_is_registered_after_renpy_persistence():
+    hooks = (CLIENT_DIR / "hooks.rpy").read_text(encoding="utf-8")
+    quit_callback = hooks[hooks.index("def mas_unisync_on_quit():") :]
+
+    assert "config.at_exit_callbacks.append(mas_unisync_shutdown)" in hooks
+    assert "atexit.register(mas_unisync_shutdown)" in hooks
+    assert "mas_unisync_shutdown()" not in quit_callback
+
+
 class FakeResponse:
     def __init__(self, status: int, payload: dict | None = None, body: bytes | None = None):
         self.status = status
@@ -94,6 +103,37 @@ def test_sync_session_acquires_lock_uploads_and_releases(tmp_path):
     assert b'name="file"; filename="persistent"' in requests[3].data
     assert session.status.lock_state == "released"
     assert session.status.last_upload_at == "2026-01-01T00:00:00Z"
+
+
+def test_final_exit_sync_uploads_before_releasing_lock():
+    sync = load_client_module("mas_unisync_sync")
+    events = []
+
+    sync.finalize_exit_sync(
+        lambda: events.append("wait"),
+        lambda: events.append("upload"),
+        lambda: events.append("release"),
+    )
+
+    assert events == ["wait", "upload", "release"]
+
+
+def test_final_exit_sync_releases_lock_when_upload_fails():
+    sync = load_client_module("mas_unisync_sync")
+    events = []
+
+    def fail_upload():
+        events.append("upload")
+        raise RuntimeError("network unavailable")
+
+    with pytest.raises(RuntimeError, match="network unavailable"):
+        sync.finalize_exit_sync(
+            lambda: events.append("wait"),
+            fail_upload,
+            lambda: events.append("release"),
+        )
+
+    assert events == ["wait", "upload", "release"]
 
 
 def test_sync_session_uses_complete_api_url_without_adding_fixed_port(tmp_path):

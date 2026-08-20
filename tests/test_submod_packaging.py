@@ -321,7 +321,7 @@ def test_persistent_guard_quit_only_blocks_when_unisync_is_enabled():
     assert "MAS UniSync final persistent save blocked" in quit_source
 
 
-def test_quit_cleanup_releases_session_even_when_guard_is_disabled():
+def test_quit_cleanup_defers_session_release_until_final_exit_callback():
     hooks_source = Path("game/Submods/MAS_UniSync/hooks.rpy").read_text(
         encoding="utf-8"
     )
@@ -337,10 +337,12 @@ def test_quit_cleanup_releases_session_even_when_guard_is_disabled():
         "    mas_unisync_cleanup_for_renpy6()", 1
     )[0]
 
-    assert "mas_unisync_shutdown()" in guard_disabled_source
     assert "return" in guard_disabled_source
-    assert "mas_unisync_session.release()" in shutdown_source
-    assert "finally:" in shutdown_source
+    assert "mas_unisync_shutdown()" not in guard_disabled_source
+    assert "mas_unisync_sync.finalize_exit_sync(" in shutdown_source
+    assert "mas_unisync_release_lock," in shutdown_source
+    assert "mas_unisync_session.release()" in hooks_source
+    assert "config.at_exit_callbacks.append(mas_unisync_shutdown)" in hooks_source
 
 
 def test_persistent_guard_screens_and_settings_entry_exist():

@@ -1,6 +1,7 @@
 init -968 python:
     import mas_unisync_http
     import mas_unisync_sync
+    import atexit
     import datetime
     import os
     import sys
@@ -16,6 +17,7 @@ init -968 python:
     mas_unisync_lock_not_held = False
     mas_unisync_startup_failed = False
     mas_unisync_guest_warning_visible = False
+    mas_unisync_exit_finalizer_installed = False
 
     def mas_unisync_savedir():
         return renpy.config.savedir
@@ -346,28 +348,49 @@ init -968 python:
         except Exception:
             pass
 
+    def mas_unisync_wait_for_upload():
+        if mas_unisync_upload_thread is not None and mas_unisync_upload_thread.is_alive():
+            mas_unisync_upload_thread.join(5.0)
+
+    def mas_unisync_release_lock():
+        if mas_unisync_session is not None and mas_unisync_session.status.lease_token:
+            try:
+                mas_unisync_session.release()
+                mas_unisync_update_status(mas_unisync_session.status)
+            except Exception as exc:
+                mas_unisync_core.submod_log_debug(str(exc))
+
+    def mas_unisync_upload_final_persistent():
+        if mas_unisync_session is not None and mas_unisync_session.status.enabled:
+            return mas_unisync_upload_now(raise_on_failure=False)
+        return None
+
     def mas_unisync_shutdown():
         if mas_unisync_startup_failed:
             return
         if mas_unisync_lock_not_held:
             return
         mas_unisync_stop_event.set()
+        mas_unisync_sync.finalize_exit_sync(
+            mas_unisync_wait_for_upload,
+            mas_unisync_upload_final_persistent,
+            mas_unisync_release_lock,
+        )
+
+    def mas_unisync_install_exit_finalizer():
+        global mas_unisync_exit_finalizer_installed
+        if mas_unisync_exit_finalizer_installed:
+            return
+        mas_unisync_exit_finalizer_installed = True
         try:
-            if mas_unisync_upload_thread is not None and mas_unisync_upload_thread.is_alive():
-                mas_unisync_upload_thread.join(5.0)
-            if mas_unisync_session is not None and mas_unisync_session.status.enabled:
-                mas_unisync_upload_now(raise_on_failure=True)
-        finally:
-            if mas_unisync_session is not None and mas_unisync_session.status.lease_token:
-                try:
-                    mas_unisync_session.release()
-                    mas_unisync_update_status(mas_unisync_session.status)
-                except Exception as exc:
-                    mas_unisync_core.submod_log_debug(str(exc))
+            config.at_exit_callbacks.append(mas_unisync_shutdown)
+        except AttributeError:
+            atexit.register(mas_unisync_shutdown)
 
     mas_unisync_cleanup_for_renpy6()
     mas_unisync_install_save_hook()
     mas_unisync_install_lock_not_held_overlay()
+    mas_unisync_install_exit_finalizer()
     mas_unisync_try_provision_guest()
 
     if mas_unisync_session is None and not mas_unisync_lock_not_held:
@@ -385,8 +408,6 @@ init python:
         if mas_unisync_lock_not_held:
             return
         if not mas_unisync_guard_enabled():
-            renpy.persistent.save()
-            mas_unisync_shutdown()
             return
         _issues = mas_unisync_find_persistent_issues()
         if _issues:
@@ -394,14 +415,6 @@ init python:
             raise Exception(
                 "MAS UniSync final persistent save blocked because persistent contains unsupported class data. "
                 "Open MAS UniSync guard details and remove the listed persistent attributes before quitting."
-            )
-        try:
-            renpy.persistent.save()
-            mas_unisync_shutdown()
-        except Exception as exc:
-            raise Exception(
-                "MAS UniSync final upload failed: {0}\n"
-                "Please manually back up your local persistent file before troubleshooting or using another client.".format(exc)
             )
 
 label mas_unisync_empty_return:

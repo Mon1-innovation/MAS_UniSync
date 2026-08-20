@@ -242,3 +242,12 @@ def should_show_guest_warning(resolved_profile, last_warning_date, today_date):
         return False
     profile = resolved_profile.get("profile", resolved_profile)
     return bool(isinstance(profile, dict) and profile.get("is_guest") and last_warning_date != today_date)
+
+
+def finalize_exit_sync(wait_for_upload, upload_final_persistent, release_lock):
+    """Upload the final on-disk persistent before releasing its lease."""
+    try:
+        wait_for_upload()
+        upload_final_persistent()
+    finally:
+        release_lock()
